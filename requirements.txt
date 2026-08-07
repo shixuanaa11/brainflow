@@ -1,0 +1,17 @@
+# BrainFlow 智脑流 — 一站式企业级任务分配工作流智能助手
+#
+# 技术栈: LangGraph（标准 StateGraph 工作流）· FastAPI · SQLite
+# 架构: router 节点（LLM 意图识别）→ 条件边分发 → 14 工具节点
+# 定位: 统领全局的任务分配工作流中枢，多渠道可接入（微信/CLI/HTTP，微信留空待接）
+#
+# 作者: 黄宇然
+# 日期: 2026-08-07
+
+openai>=1.0
+langgraph>=1.2
+langchain-core>=1.0
+langgraph-cli[inmem]
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-dotenv>=1.0
+pyyaml>=6.0

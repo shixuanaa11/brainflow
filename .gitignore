@@ -1,0 +1,42 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# ---- 虚拟环境 ----
+.venv/
+venv/
+env/
+
+# ---- 环境变量（含密钥，切勿提交） ----
+.env
+.env.local
+.env.*.local
+
+# ---- IDE / OS ----
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# ---- LangGraph / 运行时 ----
+.langgraph_api/
+.langgraph_persist/
+*.pckl
+*.pckl.tmp
+
+# ---- 日志 / 数据 ----
+logs/
+*.log
+data/
+
+# ---- Node / chat-ui（作为 submodule 单独管理，排除其本地产物） ----
+node_modules/
+.next/
+out/
+dist-frontend/

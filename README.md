@@ -1,0 +1,333 @@
+# 🧠 BrainFlow 智脑流
+
+> 一站式企业级任务分配工作流智能助手 —— 统领全局的任务分配中枢，多渠道可接入（微信 / CLI / HTTP / 更多平台）。
+
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB)
+![LangGraph](https://img.shields.io/badge/LangGraph-1.x-1C3C3C)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-009688)
+![License](https://img.shields.io/badge/License-Proprietary-24292F)
+
+### 项目信息
+
+| 项 | 内容 |
+| --- | --- |
+| **作者** | 黄宇然（huangyuran） |
+| **版本** | v1.0（2026-08-07） |
+| **技术栈** | Python 3.11+ · LangGraph 1.x · FastAPI · SQLite |
+| **代码位置** | `D:\code\brainflow` |
+| **相关文档** | [v1.0 方案总结](docs/V1.0_SUMMARY.md)（完整方案文档见 `docs/`） |
+| **协议** | 专有 · © 2026 黄宇然，保留所有权利 |
+
+> 详细方案文档见 `docs/`：`v3.1_architecture_final.md`（架构级）· `v3.1_implementation_final.md`（工程级）· `V1.0_SUMMARY.md`（v1.0 总结）· `DEBUG.md`（调试指南）· `frontend_options_2026.md`（前端选型）。
+
+---
+
+## 目录
+
+- [项目简介](#项目简介)
+- [核心特性](#核心特性)
+- [架构设计](#架构设计)
+- [快速开始](#快速开始)
+- [项目结构](#项目结构)
+- [API 接口](#api-接口)
+- [配置说明](#配置说明)
+- [开发与调试](#开发与调试)
+- [可观测性](#可观测性)
+- [常见问题](#常见问题-faq)
+- [Roadmap](#roadmap)
+- [License](#license)
+
+---
+
+## 项目简介
+
+BrainFlow（智脑流）是基于 **标准 LangGraph 架构** 的企业级任务分配工作流平台。核心思想：
+
+> **LLM 只做"听懂任务"（意图识别），任务怎么分配、怎么执行，由标准 LangGraph 工作流图编排完成——一个图统领全局，多渠道接入。**
+
+**解决什么问题**：将"意图理解 → 任务分发 → 工具执行"的链路标准化、可观测化、可插拔化——加一个业务工具只需注册一行配置，工作流图自动扩展；每次执行全程可观测（节点状态 / 耗时 / 输入输出 / Token）。
+
+### 生态定位：官方一套打底 + 自研前端
+
+**LangGraph 官方生态（一套）**：`LangGraph 框架` + `LangSmith（观测/评估/Studio 调试）` + `Agent Chat UI（前端）`。
+
+**BrainFlow 的采用**：采用官方**框架 + Server**做地基；**以 LangSmith 为主线**（观测/评估/Studio 调试搭配）；调试前端用 Agent Chat UI（本地子项目）；**在此基础上自研一套贴合业务的前端**（内置面板：对话 + 工作流图 + 节点级观测 + 看板）——官方生态做地基，自研前端做产品。
+
+```
+官方（主线）：LangGraph 框架 + Server(:2024) + LangSmith/Studio + Chat UI(调试)
+自研：内置面板(生产) + 节点级观测 + FastAPI
+```
+
+---
+
+## 核心特性
+
+| 特性 | 说明 |
+| --- | --- |
+| **标准 LangGraph 工作流** | 一个 StateGraph：`router 节点（LLM 意图识别）→ 条件边按意图分发 → 14 个工具节点 → 回复` |
+| **任务分配中枢** | 意图识别后由条件边自动分发到对应工具节点；加工具 = 注册一行，图自动扩展 |
+| **意图识别准确性** | 动态工具清单注入 + few-shot 示例 + 白名单校验防幻觉（评估脚本目标 ≥ 90%） |
+| **统一 API 接口层** | FastAPI：7 个运维 API（对齐 Hermes）+ 对话 + 工作流图 + 健康检查 |
+| **节点级可观测** | 每节点记录**状态 / 耗时 / 输入输出 / Token**；metrics 按工具维度；JSON 结构化日志 |
+| **官方生态原生兼容** | LangGraph Studio 图可视化 · Agent Chat UI 本地子项目 · LangSmith 观测主线 |
+| **多渠道接入** | 微信（留空待接）/ CLI / HTTP / 更多平台——同一套工作流图 |
+| **可插拔工具** | 注册表驱动（`register(name, fn, desc, keywords, examples)`），框架零改动 |
+
+---
+
+## 架构设计
+
+### 分层架构
+
+```mermaid
+flowchart TB
+    ENTRY[接入层<br/>CLI · HTTP · 微信（待接）]
+    WF[工作流层 src/graph.py<br/>router 节点 → 条件边分发 → 14 工具节点<br/>MessagesState · checkpointer]
+    CORE[核心层 core/<br/>router 意图识别 · registry 注册表 · llm 统一入口<br/>tracing · stats · logs]
+    API[服务层 api/main.py<br/>FastAPI :5173 · 7 API · 前端静态页 · 日志中间件]
+    OBS[可观测层<br/>LangSmith 主线 + 内置三件套 SQLite]
+    ENTRY --> WF
+    WF --> CORE
+    CORE --> API
+    API --> OBS
+```
+
+### 消息处理链路
+
+```mermaid
+flowchart TB
+    U[用户消息<br/>CLI / HTTP / 微信（待接）] --> INV[graph.invoke<br/>thread_id = user_id]
+    INV --> R[router 节点<br/>LLM 意图识别<br/>动态清单 + few-shot + 白名单<br/>→ 写 intent]
+    R -->|条件边 intent=weather| T1[tool_weather 节点]
+    R -->|条件边 intent=bilibili_upload| T2[tool_bilibili_upload 节点]
+    R -->|条件边 intent=...| T3[其余 12 个工具节点]
+    R -->|条件边 intent=general_qa| TG[tool_general_qa 节点<br/>兜底]
+    T1 --> OUT[回复文本]
+    T2 --> OUT
+    T3 --> OUT
+    TG --> OUT
+```
+
+---
+
+## 快速开始
+
+### 环境要求
+
+| 依赖 | 版本 | 说明 |
+| --- | --- | --- |
+| Python | >= 3.11 | LangGraph / FastAPI 要求 |
+| Node.js（可选） | >= 18 | 仅 Agent Chat UI（调试聊天）需要 |
+
+### 1. 安装依赖
+
+```bash
+python -m venv .venv
+# Windows
+.venv\Scripts\pip install -r requirements.txt
+# macOS / Linux
+.venv/bin/pip install -r requirements.txt
+```
+
+### 2. 配置环境变量
+
+```bash
+cp .env.example .env
+```
+
+编辑 `.env`，至少填写 LLM 配置（详细字段见 [配置说明](#配置说明)）：
+
+```ini
+LLM_MODEL=qwen3.7-max
+LLM_API_KEY=your-api-key
+LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+```
+
+### 3. 启动
+
+```bash
+.venv\Scripts\python server\main.py
+```
+
+启动成功后：
+
+- **内置前端**：http://localhost:5173（对话 / 工作流图 / 看板）
+- **Swagger 文档**：http://localhost:5173/docs
+- 日志输出 JSON 结构化（每请求带 trace_id）
+
+### 4. 验证
+
+```bash
+.venv\Scripts\python tests\validate.py        # 全链路验证（9 项，无需 LLM）
+.venv\Scripts\python tests\intents_eval.py    # 意图识别准确率评估（需 LLM，目标 ≥ 90%）
+```
+
+---
+
+## 项目结构
+
+```
+brainflow/
+├── src/graph.py          ★ 标准工作流图（router + 条件边 + 工具节点）
+├── api/                  ★ API 接口层（FastAPI）
+│   ├── main.py               7 API + /api/chat + /api/graphs + 健康检查 + 日志中间件
+│   └── static/index.html     内置前端（对话 / 工作流图 / 看板 三标签页）
+├── config/
+│   ├── settings.py       全局配置（.env）
+│   ├── profiles.py       LLM Profile 加载（${ENV} 注入）
+│   └── prompts.py        意图识别 Prompt 全文
+├── core/
+│   ├── router.py         RouterAgent.classify（LLM 意图识别 + 白名单）
+│   ├── registry.py       ToolRegistry（工具注册表，可插拔）
+│   ├── llm.py            LLMClient（OpenAI SDK 直连，token 统计）
+│   ├── tracing.py        TraceSpan（节点级观测：状态/耗时/输入输出/token）
+│   ├── stats.py          StatsCollector（指标）
+│   └── logs.py           JsonLogger（JSON 结构化日志）
+├── tools/wechat_tools.py 14 工具注册（stub，业务侧真实逻辑后续接入）
+├── chat-ui/              Agent Chat UI 本地子项目（官方脚手架，调试聊天）
+├── scripts/dev_debug.sh  一键启动调试环境（langgraph dev + 可选 chat-ui）
+├── server/main.py        入口：uvicorn 起 API + CLI 模式（微信留空）
+├── langgraph.json        LangGraph Server 图入口（langgraph dev 调试）
+├── docs/                 调试 / 选型文档（DEBUG.md / frontend_options_2026.md 等）
+├── data/                 运行时数据（SQLite）
+└── tests/
+    ├── validate.py       全链路验证（9 项，无需 LLM）
+    └── intents_eval.py   意图识别准确率评估（目标 ≥ 90%）
+```
+
+---
+
+## API 接口
+
+统一由 `api/main.py`（FastAPI，端口 **5173**）提供，Swagger：`/docs`。
+
+### 运维 API（7 个，对齐 Hermes）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/board` | 看板总览（调用数 / token / 错误 / 错误率 / 活跃工具） |
+| GET | `/api/tasks` | 任务列表（**节点级观测**：状态 / 耗时 / 输入输出 / token） |
+| GET | `/api/profiles` | 工具使用分析（次数 / token） |
+| GET | `/api/analytics/usage` | 使用统计（总数 + 按工具分布） |
+| GET | `/api/logs?n=` | 最近调用日志 |
+| GET | `/api/events` | SSE 实时事件流 |
+| GET | `/` | 前端页面 |
+
+### 业务 / 能力 API
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/chat` | 对话：`{"text": "...", "user_id": "..."}` → `{"reply": "..."}` |
+| GET | `/api/graphs` | 当前工作流图（官方 draw_mermaid 输出，前端 mermaid.js 渲染） |
+| GET | `/healthz` | 存活检查 |
+| GET | `/readyz` | 就绪检查（指标系统可用） |
+
+---
+
+## 配置说明
+
+`.env` 全字段说明：
+
+| 变量 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `LLM_MODEL` | ✅ | `qwen3.7-max` | 默认模型（对应 `llm_profiles.yaml`） |
+| `LLM_API_KEY` | ✅ | — | LLM API Key |
+| `LLM_BASE_URL` | ✅ | Dashscope | OpenAI 兼容端点 |
+| `API_HOST` | 否 | `0.0.0.0` | API 监听地址 |
+| `API_PORT` | 否 | `5173` | API 端口 |
+| `DB_DIR` | 否 | `data/` | 观测数据库目录（可覆盖到可写目录） |
+| `LANGSMITH_API_KEY` | 否 | — | LangSmith 观测（主线，langgraph dev 自动接入） |
+| `WECHAT_ACP_PATH` | 否 | — | 微信接入（留空 = 未启用，后续实现） |
+
+---
+
+## 开发与调试
+
+### CLI 模式（快速测试）
+
+```bash
+.venv\Scripts\python server\main.py --cli "深圳今天天气怎么样"
+```
+
+### 调试前端（共 3 个，全部本地化）
+
+| # | 前端 | 类型 | 场景 | 启动 |
+| --- | --- | --- | --- | --- |
+| 1 | 内置面板（`api/static/`） | 自研 | 生产（对话/图/看板） | `python server/main.py` |
+| 2 | Agent Chat UI（`chat-ui/`） | 官方脚手架 | 调试聊天 | `cd chat-ui && pnpm install && pnpm dev`（:3000） |
+| 3 | 工作流图标签页（内置） | 自研 | 调试图可视化 | `draw_mermaid()` + mermaid.js 本地渲染 |
+
+### LangGraph Server + Studio（调试后端）
+
+```bash
+pip install -U "langgraph-cli[inmem]"
+langgraph dev          # :2024，终端输出 Studio 链接
+```
+
+> ⚠️ **Agent Chat UI 连不上（Failed to fetch）**：请先启动 `langgraph dev`（:2024），再在 Chat UI 配置 `Deployment URL = http://127.0.0.1:2024` + `Assistant ID = agent`。
+
+### 一键脚本
+
+```bash
+bash scripts/dev_debug.sh            # langgraph dev + Studio 链接
+bash scripts/dev_debug.sh --chat-ui  # + Agent Chat UI
+```
+
+### 测试
+
+| 命令 | 覆盖 |
+| --- | --- |
+| `python tests/validate.py` | 图构建 / draw_mermaid / 工具节点 / API / 日志中间件 / 指标 |
+| `python tests/intents_eval.py` | 意图识别准确率（测试集 17 条，目标 ≥ 90%） |
+
+---
+
+## 可观测性
+
+**双层观测，LangSmith 为主线**：
+
+| 层 | 能力 | 数据存储 | 启用方式 |
+| --- | --- | --- | --- |
+| **LangSmith**（主线） | 观测 / 评估 / Prompt 管理 / **Studio 调试搭配** | 官方 SaaS | `langgraph dev` 自动接入 |
+| **内置三件套** | 工作流定义图 + 节点级观测（状态/耗时/输入输出/token）+ 指标 + JSON 日志 | SQLite（`observe.db`） | 默认开启 |
+
+```env
+# .env（LangSmith 观测）
+LANGSMITH_API_KEY=lsv2_xxx
+LANGSMITH_PROJECT=brainflow
+LANGSMITH_TRACING=true
+```
+
+---
+
+## 常见问题 FAQ
+
+**Q1：Agent Chat UI 报 "Unable to connect to LangGraph server"？**
+先启动后端：`langgraph dev`（确认 :2024 监听），再配置 Chat UI 的 Deployment URL = `http://127.0.0.1:2024`，Assistant ID = `agent`。
+
+**Q2：端口 5173 被占用？**
+`API_PORT=5175 python server/main.py`（或改 `.env` 的 `API_PORT`）。
+
+**Q3：加一个新工具要改哪些代码？**
+只需在 `tools/wechat_tools.py` 的 `TOOLS` 列表加一行注册（id/描述/触发词/例句），工作流图的条件边和前端自动扩展。
+
+---
+
+## Roadmap
+
+| 阶段 | 内容 | 状态 |
+| --- | --- | --- |
+| 核心工作流（标准图 + 意图识别 + FastAPI + 前端） | — | ✅ 已完成 |
+| 节点级可观测（状态/耗时/输入输出/token） | — | ✅ 已完成 |
+| LangSmith 观测接入（主线，langgraph dev 自动） | — | ✅ 就绪 |
+| 意图识别评估优化（≥ 90%） | — | ✅ 实测 100%（17/17） |
+| 工具真实逻辑接入 | 替换 `_stub` 为业务实现 | ⏸ 业务侧 |
+| 微信接入 | WeChatBridge（weixin-acp） | ⏸ 留空 |
+| checkpointer 生产化 | MemorySaver → SqliteSaver | ⏸ 待做 |
+| 前端升级 | 内置面板 → Next.js + assistant-ui | 📋 规划 |
+
+---
+
+## License
+
+© 2026 黄宇然. 保留所有权利。
