@@ -12,8 +12,8 @@
 | 项 | 内容 |
 | --- | --- |
 | **作者** | 黄宇然（huangyuran） |
-| **版本** | v1.0（2026-08-07） |
-| **技术栈** | Python 3.11+ · LangGraph 1.x · FastAPI · SQLite |
+| **版本** | v1.1（2026-08-10） |
+| **技术栈** | Python 3.11+ · LangGraph 1.x · FastAPI · SQLite · React 19 + Vite |
 | **代码位置** | `D:\code\brainflow` |
 | **相关文档** | [v1.0 方案总结](docs/V1.0_SUMMARY.md)（完整方案文档见 `docs/`） |
 | **协议** | 专有 · © 2026 黄宇然，保留所有权利 |
@@ -51,11 +51,11 @@ BrainFlow（智脑流）是基于 **标准 LangGraph 架构** 的企业级任务
 
 **LangGraph 官方生态（一套）**：`LangGraph 框架` + `LangSmith（观测/评估/Studio 调试）` + `Agent Chat UI（前端）`。
 
-**BrainFlow 的采用**：采用官方**框架 + Server**做地基；**以 LangSmith 为主线**（观测/评估/Studio 调试搭配）；调试前端用 Agent Chat UI（本地子项目）；**在此基础上自研一套贴合业务的前端**（内置面板：对话 + 工作流图 + 节点级观测 + 看板）——官方生态做地基，自研前端做产品。
+**BrainFlow 的采用**：采用官方**框架 + Server**做地基；**以 LangSmith 为主线**（观测/评估/Studio 调试搭配）；调试前端用 Agent Chat UI（本地子项目）；**在此基础上自研两套贴合业务的前端**——轻量内置面板（`:5173`）+ 完整运营看板（`web/`，`:5174`）——官方生态做地基，自研前端做产品。
 
 ```
 官方（主线）：LangGraph 框架 + Server(:2024) + LangSmith/Studio + Chat UI(调试)
-自研：内置面板(生产) + 节点级观测 + FastAPI
+自研：内置面板(:5173) + 运营看板 web/(:5174) + SSE 流式对话 + 节点级观测 + FastAPI
 ```
 
 ---
@@ -64,8 +64,10 @@ BrainFlow（智脑流）是基于 **标准 LangGraph 架构** 的企业级任务
 
 | 特性 | 说明 |
 | --- | --- |
-| **标准 LangGraph 工作流** | 一个 StateGraph：`router 节点（LLM 意图识别）→ 条件边按意图分发 → 14 个工具节点 → 回复` |
+| **标准 LangGraph 工作流** | 一个 StateGraph：`router（意图识别）→ 条件边分发 → 14 工具节点 → summary（LLM 总结）→ 回复` |
 | **任务分配中枢** | 意图识别后由条件边自动分发到对应工具节点；加工具 = 注册一行，图自动扩展 |
+| **SSE 流式对话** | `/api/chat/stream` 按节点推送 router / tool / summary 进度，summary 产出时实时返回 reply |
+| **运营看板前端** | `web/` 自研 React 看板：总览 / 链路追踪 / 工作流图 / AI 对话（SSE 流式） |
 | **意图识别准确性** | 动态工具清单注入 + few-shot 示例 + 白名单校验防幻觉（评估脚本目标 ≥ 90%） |
 | **统一 API 接口层** | FastAPI：7 个运维 API（对齐 Hermes）+ 对话 + 工作流图 + 健康检查 |
 | **节点级可观测** | 每节点记录**状态 / 耗时 / 输入输出 / Token**；metrics 按工具维度；JSON 结构化日志 |
@@ -82,7 +84,7 @@ BrainFlow（智脑流）是基于 **标准 LangGraph 架构** 的企业级任务
 ```mermaid
 flowchart TB
     ENTRY[接入层<br/>CLI · HTTP · 微信（待接）]
-    WF[工作流层 src/graph.py<br/>router 节点 → 条件边分发 → 14 工具节点<br/>MessagesState · checkpointer]
+    WF[工作流层 src/graph.py<br/>router → 条件边分发 → 14 工具节点 → summary<br/>MessagesState · checkpointer]
     CORE[核心层 core/<br/>router 意图识别 · registry 注册表 · llm 统一入口<br/>tracing · stats · logs]
     API[服务层 api/main.py<br/>FastAPI :5173 · 7 API · 前端静态页 · 日志中间件]
     OBS[可观测层<br/>LangSmith 主线 + 内置三件套 SQLite]
@@ -102,10 +104,11 @@ flowchart TB
     R -->|条件边 intent=bilibili_upload| T2[tool_bilibili_upload 节点]
     R -->|条件边 intent=...| T3[其余 12 个工具节点]
     R -->|条件边 intent=general_qa| TG[tool_general_qa 节点<br/>兜底]
-    T1 --> OUT[回复文本]
-    T2 --> OUT
-    T3 --> OUT
-    TG --> OUT
+    T1 --> S[summary 节点<br/>LLM 总结工具结果<br/>→ 用户友好回复]
+    T2 --> S
+    T3 --> S
+    TG --> S
+    S --> OUT[回复文本]
 ```
 
 ---
@@ -117,7 +120,7 @@ flowchart TB
 | 依赖 | 版本 | 说明 |
 | --- | --- | --- |
 | Python | >= 3.11 | LangGraph / FastAPI 要求 |
-| Node.js（可选） | >= 18 | 仅 Agent Chat UI（调试聊天）需要 |
+| Node.js（可选） | >= 18 | 运营看板 `web/` 与 Agent Chat UI 需要 |
 
 ### 1. 安装依赖
 
@@ -151,9 +154,17 @@ LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 
 启动成功后：
 
-- **内置前端**：http://localhost:5173（对话 / 工作流图 / 看板）
+- **内置前端**：http://localhost:5173（对话 / 工作流图 / 看板，SSE 流式对话）
 - **Swagger 文档**：http://localhost:5173/docs
 - 日志输出 JSON 结构化（每请求带 trace_id）
+
+**（可选）启动运营看板**——需先启动后端，再另开终端：
+
+```bash
+cd web && npm install && npm run dev
+```
+
+- **运营看板**：http://localhost:5174（总览 / 链路追踪 / 工作流图 / AI 对话）
 
 ### 4. 验证
 
@@ -170,8 +181,8 @@ LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 brainflow/
 ├── src/graph.py          ★ 标准工作流图（router + 条件边 + 工具节点 + summary 总结节点）
 ├── api/                  ★ API 接口层（FastAPI）
-│   ├── main.py               7 API + /api/chat + /api/graphs + 健康检查 + 日志中间件
-│   └── static/index.html     内置前端（对话 / 工作流图 / 看板 三标签页）
+│   ├── main.py               7 API + /api/chat + /api/chat/stream + /api/graphs + 健康检查
+│   └── static/index.html     内置前端（对话 SSE 流式 / 工作流图 / 看板 三标签页）
 ├── config/
 │   ├── settings.py       全局配置（.env）
 │   ├── profiles.py       LLM Profile 加载（${ENV} 注入）
@@ -224,7 +235,8 @@ brainflow/
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/chat` | 对话：`{"text": "...", "user_id": "..."}` → `{"reply": "..."}` |
+| POST | `/api/chat` | 对话（同步）：`{"text": "...", "user_id": "..."}` → `{"reply": "..."}` |
+| POST | `/api/chat/stream` | 对话（SSE 流式）：按节点推送 `step`（router/tool/summary），`reply` 在 summary 产出时返回 |
 | GET | `/api/graphs` | 当前工作流图（官方 draw_mermaid 输出，前端 mermaid.js 渲染） |
 | GET | `/healthz` | 存活检查 |
 | GET | `/readyz` | 就绪检查（指标系统可用） |
@@ -349,13 +361,16 @@ Windows 默认用 GBK 解码，而 LangGraph 源码用 `open()` 读 JSON。启�
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
 | 核心工作流（标准图 + 意图识别 + FastAPI + 前端） | — | ✅ 已完成 |
+| summary 总结节点（工具结果 → LLM 友好回复） | — | ✅ 已完成 |
+| SSE 流式对话（/api/chat/stream） | — | ✅ 已完成 |
+| 运营看板前端（web/ React + shadcn/ui + AI SDK） | — | ✅ 已完成 |
 | 节点级可观测（状态/耗时/输入输出/token） | — | ✅ 已完成 |
 | LangSmith 观测接入（主线，langgraph dev 自动） | — | ✅ 就绪 |
 | 意图识别评估优化（≥ 90%） | — | ✅ 实测 100%（17/17） |
 | 工具真实逻辑接入 | 替换 `_stub` 为业务实现 | ⏸ 业务侧 |
 | 微信接入 | WeChatBridge（weixin-acp） | ⏸ 留空 |
 | checkpointer 生产化 | MemorySaver → SqliteSaver | ⏸ 待做 |
-| 前端升级 | 内置面板 → Next.js + assistant-ui | 📋 规划 |
+| 前端深化 | 运营看板功能完善 · 内置面板与 web/ 能力对齐 | 📋 进行中 |
 
 ---
 
