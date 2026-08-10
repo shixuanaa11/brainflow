@@ -69,7 +69,7 @@ BrainFlow（智脑流）是基于 **标准 LangGraph 架构** 的企业级任务
 | **SSE 流式对话** | `/api/chat/stream` 按节点推送 router / tool / summary 进度，summary 产出时实时返回 reply |
 | **运营看板前端** | `web/` 自研 React 看板：总览 / 链路追踪 / 工作流图 / AI 对话（SSE 流式） |
 | **意图识别准确性** | 动态工具清单注入 + few-shot 示例 + 白名单校验防幻觉（评估脚本目标 ≥ 90%） |
-| **统一 API 接口层** | FastAPI：7 个运维 API（对齐 Hermes）+ 对话 + 工作流图 + 健康检查 |
+| **统一 API 接口层** | FastAPI：7 个运维 API（对齐 Hermes）+ 同步/流式对话 + 工作流图 + 健康检查 |
 | **节点级可观测** | 每节点记录**状态 / 耗时 / 输入输出 / Token**；metrics 按工具维度；JSON 结构化日志 |
 | **官方生态原生兼容** | LangGraph Studio 图可视化 · Agent Chat UI 本地子项目 · LangSmith 观测主线 |
 | **多渠道接入** | 微信（留空待接）/ CLI / HTTP / 更多平台——同一套工作流图 |
