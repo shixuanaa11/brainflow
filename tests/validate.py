@@ -31,7 +31,7 @@ def test_graph():
     # 工具节点函数直测（无需 LLM/图执行）
     node = make_tool_node(_stub("weather"), "weather")
     out = node({"messages": [HumanMessage(content="深圳天气")]})
-    check("工具节点执行（weather）", "weather" in out["messages"][-1].content)
+    check("工具节点执行（weather）", "weather" in out["tool_output"])
 
     # 完整链路（router → 条件边 → 工具）需 LLM 可用，此处 try 探测
     try:

@@ -119,7 +119,7 @@ document.querySelectorAll('.tab').forEach(t => {
   });
 });
 
-// 对话
+// 对话（SSE 流式）
 async function sendChat() {
   const input = document.getElementById('chat-input');
   const text = input.value.trim();
@@ -127,19 +127,48 @@ async function sendChat() {
   input.value = '';
   const box = document.getElementById('chat-box');
   box.innerHTML += `<div class="msg user"><div><div class="bubble">${escapeHtml(text)}</div></div></div>`;
+  const aiDiv = document.createElement('div');
+  aiDiv.className = 'msg ai';
+  aiDiv.innerHTML = `<div><div class="bubble"></div><div class="meta">⏱ 流式...</div></div>`;
+  box.appendChild(aiDiv);
+  const bubble = aiDiv.querySelector('.bubble');
+  const meta = aiDiv.querySelector('.meta');
   const t0 = Date.now();
+  let reply = '';
   try {
-    const resp = await fetch('/api/chat', {
+    const resp = await fetch('/api/chat/stream', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({text, user_id: 'web'})
     });
-    const data = await resp.json();
-    const ms = Date.now() - t0;
-    box.innerHTML += `<div class="msg ai"><div><div class="bubble">${escapeHtml(data.reply)}</div>
-      <div class="meta">⏱ ${ms}ms</div></div></div>`;
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, {stream: true});
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const part of parts) {
+        const line = part.split('\n').find(l => l.startsWith('data: '));
+        if (!line) continue;
+        const payload = JSON.parse(line.replace(/^data: /, ''));
+        if (payload.type === 'reply') {
+          reply += payload.reply;
+          bubble.innerHTML = escapeHtml(reply).replace(/\n/g, '<br>');
+          box.scrollTop = box.scrollHeight;
+        } else if (payload.type === 'error') {
+          reply += `\n[错误] ${payload.message}`;
+          bubble.innerHTML = escapeHtml(reply).replace(/\n/g, '<br>');
+        } else if (payload.type === 'node' && payload.node === 'summary') {
+          meta.textContent = '⏱ 总结中...';
+        }
+      }
+    }
   } catch (e) {
-    box.innerHTML += `<div class="msg ai"><div class="bubble">请求失败: ${e}</div></div>`;
+    bubble.innerHTML = `请求失败: ${e}`;
   }
+  meta.textContent = `⏱ ${Date.now() - t0}ms`;
   box.scrollTop = box.scrollHeight;
 }
 

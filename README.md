@@ -168,14 +168,17 @@ LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 
 ```
 brainflow/
-├── src/graph.py          ★ 标准工作流图（router + 条件边 + 工具节点）
+├── src/graph.py          ★ 标准工作流图（router + 条件边 + 工具节点 + summary 总结节点）
 ├── api/                  ★ API 接口层（FastAPI）
 │   ├── main.py               7 API + /api/chat + /api/graphs + 健康检查 + 日志中间件
 │   └── static/index.html     内置前端（对话 / 工作流图 / 看板 三标签页）
 ├── config/
 │   ├── settings.py       全局配置（.env）
 │   ├── profiles.py       LLM Profile 加载（${ENV} 注入）
-│   └── prompts.py        意图识别 Prompt 全文
+│   └── prompts.py        意图识别 Router Prompt 全文
+├── prompts/              ★ 提示词目录（各节点提示词按模块组织）
+│   ├── __init__.py           统一导出
+│   └── summary.py            summary 节点 Prompt（工具结果 → 用户友好回复）
 ├── core/
 │   ├── router.py         RouterAgent.classify（LLM 意图识别 + 白名单）
 │   ├── registry.py       ToolRegistry（工具注册表，可插拔）
@@ -184,6 +187,10 @@ brainflow/
 │   ├── stats.py          StatsCollector（指标）
 │   └── logs.py           JsonLogger（JSON 结构化日志）
 ├── tools/wechat_tools.py 14 工具注册（stub，业务侧真实逻辑后续接入）
+├── web/                  ★ 自研运营看板前端（React+Tailwind+shadcn/ui+AI SDK）
+│   ├── src/pages/            总览看板 / 任务链路 / 工作流图 / AI 对话
+│   ├── src/lib/              API 客户端 + SSE 流式封装 + 类型
+│   └── vite.config.ts        dev 代理 /api → 后端 :5173
 ├── chat-ui/              Agent Chat UI 本地子项目（官方脚手架，调试聊天）
 ├── scripts/dev_debug.sh  一键启动调试环境（langgraph dev + 可选 chat-ui）
 ├── server/main.py        入口：uvicorn 起 API + CLI 模式（微信留空）
@@ -249,13 +256,16 @@ brainflow/
 .venv\Scripts\python server\main.py --cli "深圳今天天气怎么样"
 ```
 
-### 调试前端（共 3 个，全部本地化）
+### 调试前端（共 4 个，全部本地化）
 
 | # | 前端 | 类型 | 场景 | 启动 |
 | --- | --- | --- | --- | --- |
 | 1 | 内置面板（`api/static/`） | 自研 | 生产（对话/图/看板） | `python server/main.py` |
-| 2 | Agent Chat UI（`chat-ui/`） | 官方脚手架 | 调试聊天 | `cd chat-ui && pnpm install && pnpm dev`（:3000） |
-| 3 | 工作流图标签页（内置） | 自研 | 调试图可视化 | `draw_mermaid()` + mermaid.js 本地渲染 |
+| 2 | **运营看板（`web/`）** | 自研 | 上线效果 · 追踪链路 · 工作流图 | `cd web && pnpm/npm install && npm run dev`（:5174） |
+| 3 | Agent Chat UI（`chat-ui/`） | 官方脚手架 | 调试聊天 | `cd chat-ui && pnpm install && pnpm dev`（:3000） |
+| 4 | 工作流图标签页（内置） | 自研 | 调试图可视化 | `draw_mermaid()` + mermaid.js 本地渲染 |
+
+> 💡 **运营看板（`web/`）**：React 19 + Vite + TypeScript + **Tailwind CSS 4 + shadcn/ui + Vercel AI SDK**（对齐 DeerFlow / DeepAgent 选型）。含总览看板 / 任务链路追踪（节点级观测）/ 工作流图（mermaid）/ AI 对话（SSE 流式）四个页面。dev server 默认代理 `/api` → 后端 :5173，需先启动后端。
 
 ### LangGraph Server + Studio（调试后端）
 
@@ -288,7 +298,7 @@ bash scripts/dev_debug.sh --chat-ui  # + Agent Chat UI
 
 | 层 | 能力 | 数据存储 | 启用方式 |
 | --- | --- | --- | --- |
-| **LangSmith**（主线） | 观测 / 评估 / Prompt 管理 / **Studio 调试搭配** | 官方 SaaS | `langgraph dev` 自动接入 |
+| **LangSmith**（主线） | 观测 / 评估 / Prompt 管理 / **Studio 调试搭配** | 官方 SaaS（云端） | `langgraph dev` 自动接入 |
 | **内置三件套** | 工作流定义图 + 节点级观测（状态/耗时/输入输出/token）+ 指标 + JSON 日志 | SQLite（`observe.db`） | 默认开启 |
 
 ```env
@@ -297,6 +307,21 @@ LANGSMITH_API_KEY=lsv2_xxx
 LANGSMITH_PROJECT=brainflow
 LANGSMITH_TRACING=true
 ```
+
+> ⚠️ **LangSmith 不需要单独"启动"**——它是云端 SaaS（`smith.langchain.com`），trace 上传到云端控制台查看，本地无法启动它。
+>
+> ⚠️ **内置服务（`python server/main.py`）不接 LangSmith**。内置 FastAPI 服务的观测链路是自研 `core/tracing.py` → SQLite，全程不调用 LangGraph/LangSmith 的 tracing，因此即使 `.env` 配好 key，内置服务也不会往 LangSmith 上传数据。
+>
+> LangSmith 只在**另一条链路**上生效：**先启动 `langgraph dev`（LangGraph Server，:2024）**，它会自动读取 `langgraph.json` + `.env` 并接入 LangSmith。启动成功后日志会出现 `Successfully submitted metadata to LangSmith instance`，表示 key 已生效。
+
+**两条链路的启动对照**：
+
+| 链路 | 启动命令 | 观测 | LangSmith 是否生效 |
+| --- | --- | --- | --- |
+| **内置面板**（生产） | `python server/main.py`（:5173） | 自研 SQLite 三件套 | ❌ 不接 |
+| **LangGraph Server**（调试） | `langgraph dev`（:2024） | LangSmith 云端 + Studio 图可视化 | ✅ 自动接入 |
+
+两个服务可同时运行、互不冲突：内置面板用于生产对话/看板，LangGraph Server 用于 Studio 调试图 + LangSmith 云端观测。
 
 ---
 
@@ -310,6 +335,12 @@ LANGSMITH_TRACING=true
 
 **Q3：加一个新工具要改哪些代码？**
 只需在 `tools/wechat_tools.py` 的 `TOOLS` 列表加一行注册（id/描述/触发词/例句），工作流图的条件边和前端自动扩展。
+
+**Q4：怎么用 LangSmith / 为什么 trace 没上传？**
+LangSmith 是云端 SaaS，不单独启动。它只在 `langgraph dev`（LangGraph Server）这条链路生效，且需先配置 `.env` 的 `LANGSMITH_API_KEY`。`python server/main.py` 的**内置服务不接 LangSmith**（用自研 SQLite 观测）。启动 `langgraph dev` 后看到 `Successfully submitted metadata to LangSmith instance` 即表示已接入，随后 trace 上传到 smith.langchain.com。
+
+**Q5：Windows 启动 `langgraph dev` 报 `UnicodeDecodeError: 'gbk' codec`？**
+Windows 默认用 GBK 解码，而 LangGraph 源码用 `open()` 读 JSON。启动前先设 `$env:PYTHONUTF8="1"` 和 `$env:PYTHONIOENCODING="utf-8"` 再运行 `langgraph dev`。
 
 ---
 

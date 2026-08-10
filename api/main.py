@@ -105,6 +105,62 @@ def chat(payload: dict):
     return {"reply": run_once(text, str(payload.get("user_id", "web")))}
 
 
+@app.post("/api/chat/stream")
+async def chat_stream(payload: dict):
+    """SSE 流式对话：按节点流式推送（router → tool → summary），reply 在 summary 节点产出时实时推送"""
+    text = str(payload.get("text", "")).strip()
+    user_id = str(payload.get("user_id", "web"))
+    if not text:
+        return JSONResponse({"detail": "请输入内容"}, status_code=400)
+
+    from src.graph import get_graph
+    from langchain_core.messages import HumanMessage
+    from core.tracing import get_tracer
+
+    async def gen():
+        yield f"data: {json.dumps({'type': 'start'}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'type': 'step', 'node': 'router', 'kind': 'router', 'status': 'running'}, ensure_ascii=False)}\n\n"
+        get_tracer().start_trace("agent", text, user_id)
+        graph = get_graph()
+        try:
+            async for event in graph.astream(
+                {"messages": [HumanMessage(content=text)]},
+                config={"configurable": {"thread_id": user_id or "default"}},
+                stream_mode="updates",
+            ):
+                for node, update in event.items():
+                    kind = (
+                        "router" if node == "router"
+                        else "summary" if node == "summary"
+                        else "tool"
+                    )
+                    step: dict = {
+                        "type": "step",
+                        "node": node,
+                        "kind": kind,
+                        "status": "done",
+                    }
+                    if kind == "router":
+                        step["intent"] = update.get("intent")
+                    elif kind == "tool":
+                        step["tool"] = node.removeprefix("tool_")
+                        step["output"] = update.get("tool_output")
+                    yield f"data: {json.dumps(step, ensure_ascii=False)}\n\n"
+                    # 兼容旧前端
+                    yield f"data: {json.dumps({'type': 'node', 'node': node}, ensure_ascii=False)}\n\n"
+                    # summary 节点产出最终 AIMessage → 作为 reply 推送
+                    for m in (update.get("messages") or []):
+                        if getattr(m, "type", "") == "ai" and m.content:
+                            yield f"data: {json.dumps({'type': 'reply', 'reply': m.content}, ensure_ascii=False)}\n\n"
+            get_tracer().end_trace("ok")
+        except Exception as e:
+            get_tracer().end_trace("error", str(e))
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
 @app.get("/api/graphs")
 def graphs():
     from src.graph import get_graph_mermaid
