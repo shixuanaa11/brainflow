@@ -3,8 +3,10 @@ import { useQuery } from '@tanstack/react-query'
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts'
 import { api } from '@/lib/api'
 import { PageHeader } from '@/components/layout/page-header'
+import { SpanDetailDialog, TaskDetailDialog } from '@/components/traces/trace-detail-dialog'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   ChartContainer,
@@ -13,9 +15,9 @@ import {
   type ChartConfig,
 } from '@/components/ui/chart'
 import { formatDuration } from '@/lib/utils'
-import type { Task } from '@/lib/types'
+import type { Span, Task } from '@/lib/types'
 import { SpanWorkflowTimeline } from '@/components/workflow/span-workflow-timeline'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, Eye } from 'lucide-react'
 
 const durationChartConfig = {
   duration: { label: '耗时 (ms)', color: 'hsl(var(--chart-2))' },
@@ -71,7 +73,13 @@ function SpanDurationChart({ task }: { task: Task }) {
   )
 }
 
-function SpanTable({ task }: { task: Task }) {
+function SpanTable({
+  task,
+  onViewSpan,
+}: {
+  task: Task
+  onViewSpan: (span: Span) => void
+}) {
   return (
     <div className="mt-3 overflow-x-auto rounded-lg border">
       <table className="w-full text-sm">
@@ -84,6 +92,7 @@ function SpanTable({ task }: { task: Task }) {
             <th className="p-2 font-medium">Token</th>
             <th className="p-2 font-medium">输入</th>
             <th className="p-2 font-medium">输出</th>
+            <th className="p-2 font-medium">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -96,8 +105,24 @@ function SpanTable({ task }: { task: Task }) {
               </td>
               <td className="p-2 tabular-nums">{formatDuration(s.duration * 1000)}</td>
               <td className="p-2 tabular-nums">{s.tokens ?? 0}</td>
-              <td className="max-w-[180px] truncate p-2 text-muted-foreground">{s.input || '-'}</td>
-              <td className="max-w-[220px] truncate p-2 text-muted-foreground">{s.output || '-'}</td>
+              <td className="max-w-[160px] truncate p-2 text-muted-foreground" title={s.input}>
+                {s.input || '-'}
+              </td>
+              <td className="max-w-[180px] truncate p-2 text-muted-foreground" title={s.output}>
+                {s.output || '-'}
+              </td>
+              <td className="p-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className="gap-1"
+                  onClick={() => onViewSpan(s)}
+                >
+                  <Eye className="size-3.5" />
+                  详情
+                </Button>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -108,49 +133,71 @@ function SpanTable({ task }: { task: Task }) {
 
 function TaskItem({ task }: { task: Task }) {
   const [open, setOpen] = useState(false)
+  const [taskDetailOpen, setTaskDetailOpen] = useState(false)
+  const [selectedSpan, setSelectedSpan] = useState<Span | null>(null)
   const totalMs = task.spans.reduce((acc, s) => acc + s.duration * 1000, 0)
 
   return (
-    <Card className="overflow-hidden">
-      <button
-        type="button"
-        className="flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-accent/40"
-        onClick={() => setOpen(!open)}
-      >
-        {open ? (
-          <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+    <>
+      <Card className="overflow-hidden">
+        <div className="flex items-start gap-2 p-4">
+          <button
+            type="button"
+            className="mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            onClick={() => setOpen(!open)}
+            aria-label={open ? '收起' : '展开'}
+          >
+            {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+          </button>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-xs text-muted-foreground">{task.trace_id}</span>
+              <Badge variant="secondary">{task.workflow}</Badge>
+              <NodeBadge status={task.status} />
+            </div>
+            <p className="mt-1 line-clamp-2 text-sm">{task.input}</p>
+          </div>
+
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            <div className="text-right text-xs text-muted-foreground">
+              <div>{new Date(task.timestamp * 1000).toLocaleTimeString('zh-CN')}</div>
+              <div>
+                {task.spans.length} 节点 · {formatDuration(totalMs)}
+              </div>
+            </div>
+            <Button type="button" variant="outline" size="xs" className="gap-1" onClick={() => setTaskDetailOpen(true)}>
+              <Eye className="size-3.5" />
+              任务详情
+            </Button>
+          </div>
+        </div>
+
+        {open && (
+          <div className="border-t px-4 pb-4">
+            {task.spans.length > 0 ? (
+              <>
+                <SpanWorkflowTimeline spans={task.spans} />
+                <SpanDurationChart task={task} />
+                <SpanTable task={task} onViewSpan={setSelectedSpan} />
+              </>
+            ) : (
+              <p className="mt-3 text-sm text-muted-foreground">无节点记录</p>
+            )}
+          </div>
         )}
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-xs text-muted-foreground">{task.trace_id}</span>
-            <Badge variant="secondary">{task.workflow}</Badge>
-            <NodeBadge status={task.status} />
-          </div>
-          <p className="mt-1 truncate text-sm">{task.input}</p>
-        </div>
-        <div className="shrink-0 text-right text-xs text-muted-foreground">
-          <div>{new Date(task.timestamp * 1000).toLocaleTimeString('zh-CN')}</div>
-          <div>
-            {task.spans.length} 节点 · {formatDuration(totalMs)}
-          </div>
-        </div>
-      </button>
-      {open && (
-        <div className="border-t px-4 pb-4">
-          {task.spans.length > 0 ? (
-            <>
-              <SpanWorkflowTimeline spans={task.spans} />
-              <SpanDurationChart task={task} />
-              <SpanTable task={task} />
-            </>
-          ) : (
-            <p className="mt-3 text-sm text-muted-foreground">无节点记录</p>
-          )}
-        </div>
-      )}
-    </Card>
+      </Card>
+
+      <TaskDetailDialog task={task} open={taskDetailOpen} onOpenChange={setTaskDetailOpen} />
+      <SpanDetailDialog
+        span={selectedSpan}
+        traceId={task.trace_id}
+        open={selectedSpan != null}
+        onOpenChange={(next) => {
+          if (!next) setSelectedSpan(null)
+        }}
+      />
+    </>
   )
 }
 

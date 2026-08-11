@@ -8,7 +8,8 @@ ROOT = Path(__file__).parent.parent
 load_dotenv(ROOT / ".env")
 
 # ---- LLM ----
-LLM_MODEL = os.getenv("LLM_MODEL", "qwen3.7-max")
+LLM_MODEL = os.getenv("LLM_MODEL", "qwen3.7-flash")
+LLM_ENABLE_THINKING = os.getenv("LLM_ENABLE_THINKING", "false").lower() in ("1", "true", "yes")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")
 
@@ -27,6 +28,12 @@ LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "")
 LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "")
 LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "http://localhost:3000")
 LANGFUSE_ENABLED = bool(LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY)
+
+# ---- 财税日报 API（caishui-report skill）----
+CAISHUI_REPORT_URL = os.getenv(
+    "CAISHUI_REPORT_URL", "http://127.0.0.1:8000/api/v1/generate-report"
+)
+CAISHUI_REPORT_TIMEOUT = int(os.getenv("CAISHUI_REPORT_TIMEOUT", "300"))
 
 # ---- 微信（留空 = 未启用，后续实现）----
 WECHAT_ACP_PATH = os.getenv("WECHAT_ACP_PATH", "")

@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **作者** | 黄宇然（huangyuran） |
-| **版本** | v1.1（2026-08-10） |
+| **版本** | v1.2（2026-08-11） |
 | **技术栈** | Python 3.11+ · LangGraph 1.x · FastAPI · SQLite · React 19 + Vite |
 | **代码位置** | `D:\code\brainflow` |
 | **相关文档** | [v1.0 方案总结](docs/V1.0_SUMMARY.md)（完整方案文档见 `docs/`） |
@@ -107,6 +107,12 @@ LangGraph 工作流交互式可视化（React Flow + Mermaid 自动布局），r
 | 链路可视化（意图识别 → 工具调用 → 总结） | 流式回复与工具详情 |
 | --- | --- |
 | ![AI 对话 - 链路可视化](assest/ai对话1.png) | ![AI 对话 - 流式回复](assest/ai对话2.png) |
+
+**v1.2 更新**：会话历史侧边栏、欢迎页、天气/财税工具实机效果。
+
+| 新 AI 对话界面（历史 + 欢迎页） | 天气工具（Open-Meteo） | 财税日报（caishui-report） |
+| --- | --- | --- |
+| ![新 AI 界面](assest/新ai界面.png) | ![天气测试](assest/天气测试.png) | ![财税日报](assest/财税日报.png) |
 
 ---
 

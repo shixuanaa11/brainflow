@@ -102,3 +102,37 @@ export interface WorkflowStep {
   output?: string
   error?: string
 }
+
+// 聊天历史
+export interface ChatSession {
+  session_id: string
+  user_id: string
+  title: string
+  created_at: number
+  updated_at: number
+}
+
+export interface ChatSessionsResponse {
+  sessions: ChatSession[]
+  count: number
+}
+
+export interface StoredChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+  created_at?: number
+  meta?: {
+    steps?: WorkflowStep[]
+    tools?: Array<{
+      name: string
+      state: string
+      input?: unknown
+      output?: string
+      errorText?: string
+    }>
+  }
+}
+
+export interface ChatSessionDetail extends ChatSession {
+  messages: StoredChatMessage[]
+}

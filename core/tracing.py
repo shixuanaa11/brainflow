@@ -8,7 +8,6 @@ from pathlib import Path
 from config.settings import DB_OBSERVE
 
 _lock = threading.Lock()
-MAX_IO_LEN = 500   # 输入输出摘要截断长度，防 DB 膨胀
 
 
 class TraceSpan:
@@ -72,9 +71,9 @@ class TraceSpan:
                     "INSERT INTO spans (trace_id,node,kind,duration,status,detail,input,output,tokens,ts) "
                     "VALUES (?,?,?,?,?,?,?,?,?,?)",
                     (c["id"], node, kind, duration, status,
-                     str(detail)[:MAX_IO_LEN],
-                     str(input_text)[:MAX_IO_LEN],
-                     str(output_text)[:MAX_IO_LEN], int(tokens), time.time()))
+                     str(detail),
+                     str(input_text),
+                     str(output_text), int(tokens), time.time()))
 
     def set_current_node(self, node: str):
         """节点执行开始前调用：LLM 的 token 将挂到该节点"""

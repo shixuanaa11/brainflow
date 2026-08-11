@@ -8,6 +8,7 @@ import asyncio
 import json
 import time
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -15,12 +16,23 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from core.logs import get_logger
+from core.llm import get_client
 from core.stats import get_stats
 from core.tracing import get_tracer
+from src.graph import init_graph
 
 ROOT = Path(__file__).parent.parent
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_graph()
+    get_client().warmup()   # 预热 LLM HTTP 连接，避免首请求握手计入 router
+    yield
+
+
 app = FastAPI(title="BrainFlow 智脑流", docs_url="/docs",
-              openapi_url="/api/openapi.json")
+              openapi_url="/api/openapi.json", lifespan=lifespan)
 log = get_logger("api")
 START_TIME = time.time()
 
@@ -97,12 +109,12 @@ async def events():
 
 # ---- 对话 + 图 ----
 @app.post("/api/chat")
-def chat(payload: dict):
+async def chat(payload: dict):
     text = str(payload.get("text", "")).strip()
     if not text:
         return {"reply": "请输入内容"}
-    from server.main import run_once
-    return {"reply": run_once(text, str(payload.get("user_id", "web")))}
+    from server.main import run_once_async
+    return {"reply": await run_once_async(text, str(payload.get("user_id", "web")))}
 
 
 @app.post("/api/chat/stream")
@@ -113,7 +125,7 @@ async def chat_stream(payload: dict):
     if not text:
         return JSONResponse({"detail": "请输入内容"}, status_code=400)
 
-    from src.graph import get_graph
+    from src.graph import get_graph_async
     from langchain_core.messages import HumanMessage
     from core.tracing import get_tracer
 
@@ -121,16 +133,16 @@ async def chat_stream(payload: dict):
         yield f"data: {json.dumps({'type': 'start'}, ensure_ascii=False)}\n\n"
         yield f"data: {json.dumps({'type': 'step', 'node': 'router', 'kind': 'router', 'status': 'running'}, ensure_ascii=False)}\n\n"
         get_tracer().start_trace("agent", text, user_id)
-        graph = get_graph()
+        graph = await get_graph_async()
         try:
             async for event in graph.astream(
                 {"messages": [HumanMessage(content=text)]},
-                config={"configurable": {"thread_id": user_id or "default"}},
                 stream_mode="updates",
             ):
                 for node, update in event.items():
                     kind = (
                         "router" if node == "router"
+                        else "qa" if node == "general_qa"
                         else "summary" if node == "summary"
                         else "tool"
                     )
@@ -148,7 +160,7 @@ async def chat_stream(payload: dict):
                     yield f"data: {json.dumps(step, ensure_ascii=False)}\n\n"
                     # 兼容旧前端
                     yield f"data: {json.dumps({'type': 'node', 'node': node}, ensure_ascii=False)}\n\n"
-                    # summary 节点产出最终 AIMessage → 作为 reply 推送
+                    # summary / general_qa 节点产出最终 AIMessage → 作为 reply 推送
                     for m in (update.get("messages") or []):
                         if getattr(m, "type", "") == "ai" and m.content:
                             yield f"data: {json.dumps({'type': 'reply', 'reply': m.content}, ensure_ascii=False)}\n\n"
@@ -159,6 +171,66 @@ async def chat_stream(payload: dict):
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+# ---- 聊天历史 ----
+@app.get("/api/chat/sessions")
+def chat_sessions(user_id: str = "web", limit: int = 50):
+    from core.chat_history import get_chat_history
+    sessions = get_chat_history().list_sessions(user_id, limit=min(limit, 100))
+    return {"sessions": sessions, "count": len(sessions)}
+
+
+@app.post("/api/chat/sessions")
+def chat_create_session(payload: dict):
+    from core.chat_history import get_chat_history
+    user_id = str(payload.get("user_id", "web"))
+    title = str(payload.get("title", "新对话")).strip() or "新对话"
+    session = get_chat_history().create_session(user_id, title)
+    return session
+
+
+@app.get("/api/chat/sessions/{session_id}")
+def chat_get_session(session_id: str):
+    from core.chat_history import get_chat_history
+    hist = get_chat_history()
+    session = hist.get_session(session_id)
+    if not session:
+        return JSONResponse({"detail": "会话不存在"}, status_code=404)
+    messages = hist.get_messages(session_id)
+    return {**session, "messages": messages}
+
+
+@app.patch("/api/chat/sessions/{session_id}")
+def chat_update_session(session_id: str, payload: dict):
+    from core.chat_history import get_chat_history
+    hist = get_chat_history()
+    if not hist.get_session(session_id):
+        return JSONResponse({"detail": "会话不存在"}, status_code=404)
+    title = str(payload.get("title", "")).strip()
+    if title:
+        hist.update_title(session_id, title)
+    return {"ok": True}
+
+
+@app.post("/api/chat/sessions/{session_id}/messages")
+def chat_append_messages(session_id: str, payload: dict):
+    from core.chat_history import get_chat_history
+    hist = get_chat_history()
+    if not hist.get_session(session_id):
+        return JSONResponse({"detail": "会话不存在"}, status_code=404)
+    messages = payload.get("messages") or []
+    hist.append_messages(session_id, messages)
+    return {"ok": True, "count": len(messages)}
+
+
+@app.delete("/api/chat/sessions/{session_id}")
+def chat_delete_session(session_id: str):
+    from core.chat_history import get_chat_history
+    deleted = get_chat_history().delete_session(session_id)
+    if not deleted:
+        return JSONResponse({"detail": "会话不存在"}, status_code=404)
+    return {"ok": True}
 
 
 @app.get("/api/graphs")

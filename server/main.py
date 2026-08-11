@@ -5,6 +5,7 @@
   python server/main.py --cli "消息"      # CLI 模式直接测试
 """
 import argparse
+import asyncio
 import sys
 import threading
 from pathlib import Path
@@ -14,22 +15,20 @@ sys.path.insert(0, str(ROOT))
 
 from config.settings import API_HOST, API_PORT
 from core.logs import get_logger
-from src.graph import get_graph
 
 log = get_logger("main")
 
 
-def run_once(text: str, user_id: str = "") -> str:
-    """单次执行：graph.invoke（标准 API）"""
+async def run_once_async(text: str, user_id: str = "") -> str:
+    """单次执行：graph.ainvoke（标准 API）"""
     from langchain_core.messages import HumanMessage
     from core.tracing import get_tracer
+    from src.graph import get_graph_async
 
     get_tracer().start_trace("agent", text, user_id)
     try:
-        result = get_graph().invoke(
-            {"messages": [HumanMessage(content=text)]},
-            config={"configurable": {"thread_id": user_id or "default"}},
-        )
+        graph = await get_graph_async()
+        result = await graph.ainvoke({"messages": [HumanMessage(content=text)]})
         get_tracer().end_trace("ok")
         for m in reversed(result["messages"]):
             if getattr(m, "type", "") == "ai":
@@ -41,6 +40,15 @@ def run_once(text: str, user_id: str = "") -> str:
         return f"执行出错: {e}"
 
 
+def run_once(text: str, user_id: str = "") -> str:
+    """同步包装（CLI / 无 event loop 场景）"""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(run_once_async(text, user_id))
+    raise RuntimeError("Use await run_once_async() inside async context")
+
+
 def main():
     import uvicorn
 
@@ -49,11 +57,10 @@ def main():
     parser.add_argument("--no-api", action="store_true", help="不启动 API 服务")
     args = parser.parse_args()
 
-    get_graph()   # 预热：注册工具 + 编译图
-    log.info("工作流图就绪（router → 条件边 → 14 工具节点）")
+    log.info("工作流图将在 API 启动时初始化（无会话记忆，观测见 data/observe.db）")
 
     if args.cli:
-        print(run_once(args.cli, user_id="cli"))
+        print(asyncio.run(run_once_async(args.cli, user_id="cli")))
         return
 
     if not args.no_api:

@@ -5,15 +5,24 @@ from typing import Callable
 class ToolRegistry:
     def __init__(self):
         self._tools: dict[str, Callable] = {}
-        self._meta: dict[str, dict] = {}   # name → {desc, keywords, examples}
+        self._meta: dict[str, dict] = {}   # name → {desc, keywords, examples, direct_reply}
 
     def register(self, name: str, fn: Callable, desc: str = "",
                  keywords: list[str] | None = None,
-                 examples: list[str] | None = None):
+                 examples: list[str] | None = None,
+                 direct_reply: bool = False,
+                 router_hint: str = "",
+                 router_exclude: str = ""):
         """注册工具：fn 签名 (query="", **kwargs) -> str"""
         self._tools[name] = fn
-        self._meta[name] = {"desc": desc, "keywords": keywords or [],
-                            "examples": examples or []}
+        self._meta[name] = {
+            "desc": desc,
+            "keywords": keywords or [],
+            "examples": examples or [],
+            "direct_reply": direct_reply,
+            "router_hint": router_hint,
+            "router_exclude": router_exclude,
+        }
 
     def get(self, name: str) -> Callable | None:
         return self._tools.get(name)

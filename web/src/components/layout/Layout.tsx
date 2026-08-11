@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { LayoutDashboard, GitBranch, Workflow, MessageSquare, Brain } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ThemeToggle } from '@/components/theme-toggle'
@@ -12,8 +12,16 @@ const nav = [
 ]
 
 export default function Layout() {
+  const location = useLocation()
+  const isChat = location.pathname === '/chat'
+
   return (
-    <div className="flex min-h-screen bg-background">
+    <div
+      className={cn(
+        'flex bg-background',
+        isChat ? 'h-svh overflow-hidden' : 'min-h-screen',
+      )}
+    >
       <aside className="fixed inset-y-0 left-0 z-30 flex w-60 flex-col border-r border-sidebar-border bg-sidebar/95 text-sidebar-foreground backdrop-blur-md">
         <div className="flex flex-col gap-1 p-5">
           <div className="flex items-center gap-2.5">
@@ -58,8 +66,12 @@ export default function Layout() {
         </div>
       </aside>
 
-      <main className="ml-60 flex-1">
-        <div className="mx-auto max-w-7xl p-6">
+      <main className={cn('ml-60 flex-1', isChat && 'overflow-hidden')}>
+        <div
+          className={cn(
+            isChat ? 'flex h-svh flex-col' : 'mx-auto max-w-7xl p-6',
+          )}
+        >
           <Outlet />
         </div>
       </main>
