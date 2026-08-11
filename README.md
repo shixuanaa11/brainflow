@@ -94,6 +94,10 @@ BrainFlow（智脑流）是基于 **标准 LangGraph 架构** 的企业级任务
 
 ![任务链路追踪](assest/任务链路.png)
 
+点击节点可打开详情弹窗，查看单节点耗时、Token、输入输出及 `direct_reply` 透传标记。
+
+![任务链路详情弹窗](assest/任务链路详情弹窗.png)
+
 ### 工作流图
 
 LangGraph 工作流交互式可视化（React Flow + Mermaid 自动布局），router 条件边 → 14 工具节点 → summary。
