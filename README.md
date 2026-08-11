@@ -117,6 +117,23 @@ LangGraph 工作流交互式可视化（React Flow + Mermaid 自动布局），r
 | --- | --- | --- |
 | ![新 AI 界面](assest/新ai界面.png) | ![天气测试](assest/天气测试.png) | ![财税日报](assest/财税日报.png) |
 
+### 演示视频
+
+前端看板（`web/` `:5174`）实机录屏，展示 AI 对话页的链路可视化、工具调用与流式回复。
+
+**演示 1：简单问答 + 天气查询**
+
+通用问答（general_qa）与天气工具（Open-Meteo）联调：意图识别 → 工具执行 → summary / direct_reply 全链路。
+
+<video src="assest/brainflow前端看板演示1.mp4" controls width="100%"></video>
+
+**演示 2：财税日报生成**
+
+`info_hunt` 对接 caishui-report 日报 API，展示财税日报生成与格式化输出。  
+> 视频已做裁切加速；实际 API 等待时间通常更长，请以本地实跑为准。
+
+<video src="assest/brainflow前端看板演示2.mp4" controls width="100%"></video>
+
 ---
 
 ## 架构设计

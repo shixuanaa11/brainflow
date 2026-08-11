@@ -71,6 +71,13 @@ npm run preview  # 预览生产构建
 
 界面截图见仓库根目录 [`assest/`](../assest/) 与 [根 README · 运营看板预览](../README.md#运营看板预览)。
 
+### 演示视频
+
+| 视频 | 内容 |
+| --- | --- |
+| [演示 1](../assest/brainflow前端看板演示1.mp4) | 简单问答 + 天气查询（general_qa / weather 全链路） |
+| [演示 2](../assest/brainflow前端看板演示2.mp4) | 财税日报生成（info_hunt → caishui-report；视频已裁切，实际等待更久） |
+
 ---
 
 ## 目录结构
