@@ -8,7 +8,6 @@ from config.settings import (LLM_MODEL, LLM_API_KEY, LLM_BASE_URL,
                              LLM_ENABLE_THINKING,
                              LANGFUSE_ENABLED, LANGFUSE_HOST,
                              LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY)
-from config.profiles import get_profile
 from core.logs import get_logger
 from core.stats import get_stats
 
@@ -39,10 +38,7 @@ class LLMClient:
             return None
 
     def _resolve_endpoint(self) -> tuple[str, str]:
-        profile = get_profile(self._model)
-        base_url = (profile or {}).get("base_url") or LLM_BASE_URL
-        api_key = (profile or {}).get("api_key") or LLM_API_KEY
-        return base_url or "", api_key or ""
+        return LLM_BASE_URL or "", LLM_API_KEY or ""
 
     def warmup(self):
         """预热 HTTP 连接（避免首请求额外握手耗时计入 router）"""

@@ -1,18 +1,31 @@
-profiles:
-  qwen3.7-flash:
-    model: qwen3.7-flash
-    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    api_key: ${LLM_API_KEY}
-  qwen3.7-plus:
-    model: qwen3.7-plus
-    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    api_key: ${LLM_API_KEY}
-  qwen3.7-max:
-    model: qwen3.7-max
-    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    api_key: ${LLM_API_KEY}
-  deepseek-v4-pro:
-    model: deepseek-v4-pro
-    base_url: https://api.deepseek.com
-    api_key: ${LLM_API_KEY_DEEPSEEK}
-default: qwen3.7-flash
+# LLM 模型 Profiles 配置（对齐工匠社 GJS 规范）
+# ================================================================
+# 每个 profile 含 model / base_url / api_key；api_key 支持 ${ENV} 从 .env 注入
+# 切换模型：只改 .env 的 LLM_MODEL=<profile 名>
+# 读取：from config.settings import LLM_PROFILES, get_llm_profile
+# ================================================================
+
+qwen3.7-flash:
+  model: qwen3.7-flash
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  api_key: ${LLM_API_KEY}
+
+qwen3.7-plus:
+  model: qwen3.7-plus
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  api_key: ${LLM_API_KEY}
+
+qwen3.7-max:
+  model: qwen3.7-max
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  api_key: ${LLM_API_KEY}
+
+MiniMax-M3:
+  model: MiniMax-M3
+  base_url: https://api.minimax.chat/v1
+  api_key: ${LLM_API_KEY_MINIMAX}
+
+deepseek-v4-pro:
+  model: deepseek-v4-pro
+  base_url: https://api.deepseek.com
+  api_key: ${LLM_API_KEY_DEEPSEEK}

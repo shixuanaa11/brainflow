@@ -7,11 +7,15 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).parent.parent
 load_dotenv(ROOT / ".env")
 
-# ---- LLM ----
+# ---- LLM（切换模型只改 .env 的 LLM_MODEL，api_key/base_url 见 config/llm_profiles.yaml）----
+from config.profiles import get_llm_profile, load_profiles
+
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen3.7-flash")
 LLM_ENABLE_THINKING = os.getenv("LLM_ENABLE_THINKING", "false").lower() in ("1", "true", "yes")
-LLM_API_KEY = os.getenv("LLM_API_KEY", "")
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")
+_llm_active = get_llm_profile(LLM_MODEL)
+LLM_API_KEY = _llm_active["api_key"]
+LLM_BASE_URL = _llm_active["base_url"]
+LLM_PROFILES = load_profiles()
 
 # ---- 数据 ----
 DATA_DIR = ROOT / "data"

@@ -1,4 +1,4 @@
-"""LLM Profile 加载：多模型配置，${ENV} 注入，去硬编码"""
+"""LLM Profile 加载：扁平 llm_profiles.yaml，按 LLM_MODEL 名匹配"""
 import os
 import re
 from pathlib import Path
@@ -6,39 +6,54 @@ from pathlib import Path
 import yaml
 
 _PROFILE_FILE = Path(__file__).parent / "llm_profiles.yaml"
-_PROFILES: dict = {}
-_DEFAULT_NAME: str = ""
+_PROFILES: dict[str, dict] | None = None
 
 
 def _resolve(value: str) -> str:
     return re.sub(r"\$\{(\w+)\}", lambda m: os.getenv(m.group(1), ""), str(value))
 
 
-def load_profiles() -> dict:
-    global _PROFILES, _DEFAULT_NAME
-    if _PROFILES:
+def _normalize_base_url(url: str) -> str:
+    """OpenAI SDK 会自动追加 /chat/completions，去掉 yaml 里误写的完整路径"""
+    url = (url or "").rstrip("/")
+    suffix = "/chat/completions"
+    if url.endswith(suffix):
+        return url[: -len(suffix)]
+    return url
+
+
+def load_profiles() -> dict[str, dict]:
+    global _PROFILES
+    if _PROFILES is not None:
         return _PROFILES
-    if _PROFILE_FILE.exists():
-        raw = yaml.safe_load(_PROFILE_FILE.read_text(encoding="utf-8")) or {}
-        for name, cfg in raw.get("profiles", {}).items():
-            _PROFILES[name] = {
-                "model": cfg["model"],
-                "base_url": _resolve(cfg.get("base_url", "")),
-                "api_key": _resolve(cfg.get("api_key", "")),
-            }
-        # YAML 顶层 default 是 profile 名（字符串），不是 profiles 里的条目
-        default = raw.get("default", "")
-        if isinstance(default, str) and default in _PROFILES:
-            _DEFAULT_NAME = default
-        elif _PROFILES:
-            _DEFAULT_NAME = next(iter(_PROFILES))
+
+    if not _PROFILE_FILE.exists():
+        _PROFILES = {}
+        return _PROFILES
+
+    raw = yaml.safe_load(_PROFILE_FILE.read_text(encoding="utf-8")) or {}
+    _PROFILES = {}
+    for name, cfg in raw.items():
+        if not isinstance(cfg, dict) or "model" not in cfg:
+            continue
+        _PROFILES[name] = {
+            "model": cfg["model"],
+            "base_url": _normalize_base_url(_resolve(cfg.get("base_url", ""))),
+            "api_key": _resolve(cfg.get("api_key", "")),
+        }
     return _PROFILES
 
 
-def get_profile(name: str = "") -> dict | None:
+def get_llm_profile(name: str) -> dict:
+    """按 profile 名（= .env LLM_MODEL）取配置；不存在则抛 KeyError"""
     profiles = load_profiles()
-    if name and name in profiles:
-        return profiles[name]
-    if _DEFAULT_NAME and _DEFAULT_NAME in profiles:
-        return profiles[_DEFAULT_NAME]
-    return next(iter(profiles.values()), None) if profiles else None
+    if name not in profiles:
+        available = ", ".join(sorted(profiles)) or "(empty)"
+        raise KeyError(
+            f"LLM profile '{name}' not found in llm_profiles.yaml. Available: {available}"
+        )
+    return profiles[name]
+
+
+# 兼容旧调用
+get_profile = get_llm_profile

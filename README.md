@@ -32,8 +32,7 @@
 - [项目结构](#项目结构)
 - [API 接口](#api-接口)
 - [配置说明](#配置说明)
-- [开发与调试](#开发与调试)
-- [可观测性](#可观测性)
+- [开发与运维](#开发与运维)
 - [常见问题](#常见问题-faq)
 - [Roadmap](#roadmap)
 - [License](#license)
@@ -71,8 +70,8 @@ BrainFlow（智脑流）是基于 **标准 LangGraph 架构** 的企业级任务
 | **运营看板前端** | `web/` 自研 React 看板：总览 / 链路追踪 / 工作流图 / AI 对话（SSE 流式） |
 | **意图识别准确性** | 动态工具清单注入 + few-shot 示例 + 白名单校验防幻觉（评估脚本目标 ≥ 90%） |
 | **统一 API 接口层** | FastAPI：7 个运维 API（对齐 Hermes）+ 同步/流式对话 + 工作流图 + 健康检查 |
-| **节点级可观测** | 每节点记录**状态 / 耗时 / 输入输出 / Token**；metrics 按工具维度；JSON 结构化日志 |
-| **官方生态原生兼容** | LangGraph Studio 图可视化 · Agent Chat UI 本地子项目 · LangSmith 观测主线 |
+| **节点级可观测** | 生产侧 SQLite 三件套（状态/耗时/输入输出/token）；开发侧 **LangSmith** 为主线（trace / 评估 / Studio） |
+| **官方生态原生兼容** | LangGraph Studio 图可视化 · Agent Chat UI · **LangSmith 开发运维主线** |
 | **多渠道接入** | 微信（留空待接）/ CLI / HTTP / 更多平台——同一套工作流图 |
 | **可插拔工具** | 注册表驱动（`register(name, fn, desc, keywords, examples)`），框架零改动 |
 
@@ -184,10 +183,11 @@ cp .env.example .env
 编辑 `.env`，至少填写 LLM 配置（详细字段见 [配置说明](#配置说明)）：
 
 ```ini
-LLM_MODEL=qwen3.7-max
+LLM_MODEL=qwen3.7-flash
 LLM_API_KEY=your-api-key
-LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 ```
+
+> 各模型的 `base_url` / `api_key` 在 `config/llm_profiles.yaml` 中维护；切换模型只改 `LLM_MODEL`。
 
 ### 3. 启动
 
@@ -241,7 +241,7 @@ brainflow/
 │   ├── stats.py          StatsCollector（指标）
 │   └── logs.py           JsonLogger（JSON 结构化日志）
 ├── tools/wechat_tools.py 14 工具注册（stub，业务侧真实逻辑后续接入）
-├── web/                  ★ 自研运营看板前端（React+Tailwind+shadcn/ui+AI SDK）
+├── web/                  ★ 自研运营看板前端（详见 [web/README.md](web/README.md)）
 │   ├── src/pages/            总览看板 / 任务链路 / 工作流图 / AI 对话
 │   ├── src/lib/              API 客户端 + SSE 流式封装 + 类型
 │   └── vite.config.ts        dev 代理 /api → 后端 :5173
@@ -262,7 +262,9 @@ brainflow/
 
 统一由 `api/main.py`（FastAPI，端口 **5173**）提供，Swagger：`/docs`。
 
-### 运维 API（7 个，对齐 Hermes）
+### 内置运维 API（生产看板 · SQLite）
+
+生产环境日常运维由内置 FastAPI + 运营看板承担（**不接 LangSmith**）。开发调试、trace 分析、Prompt 评估请走 [LangSmith 开发运维](#langsmith-开发运维主线) 链路。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -292,18 +294,56 @@ brainflow/
 
 | 变量 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `LLM_MODEL` | ✅ | `qwen3.7-max` | 默认模型（对应 `llm_profiles.yaml`） |
-| `LLM_API_KEY` | ✅ | — | LLM API Key |
-| `LLM_BASE_URL` | ✅ | Dashscope | OpenAI 兼容端点 |
+| `LLM_MODEL` | ✅ | `qwen3.7-flash` | 当前模型 profile 名（见 `config/llm_profiles.yaml`） |
+| `LLM_ENABLE_THINKING` | 否 | `false` | 是否开启模型 thinking 模式 |
+| `LLM_API_KEY` | ✅* | — | Dashscope / 通义等（yaml 中 `${LLM_API_KEY}` 引用） |
+| `LLM_API_KEY_MINIMAX` | 否 | — | MiniMax profile 专用 key |
+| `LLM_API_KEY_DEEPSEEK` | 否 | — | DeepSeek profile 专用 key |
 | `API_HOST` | 否 | `0.0.0.0` | API 监听地址 |
 | `API_PORT` | 否 | `5173` | API 端口 |
 | `DB_DIR` | 否 | `data/` | 观测数据库目录（可覆盖到可写目录） |
-| `LANGSMITH_API_KEY` | 否 | — | LangSmith 观测（主线，langgraph dev 自动接入） |
+| `LANGSMITH_API_KEY` | 否 | — | **LangSmith 开发运维主线**（`langgraph dev` 自动接入） |
+| `LANGSMITH_PROJECT` | 否 | `brainflow` | LangSmith 项目名 |
+| `LANGSMITH_TRACING` | 否 | `true` | 是否开启 trace 上传 |
 | `WECHAT_ACP_PATH` | 否 | — | 微信接入（留空 = 未启用，后续实现） |
 
 ---
 
-## 开发与调试
+## 开发与运维
+
+**LangSmith 为开发运维主线**：工作流调试、全链路 trace、Prompt 评估、Studio 图可视化均通过 LangGraph Server + LangSmith 完成。生产对话与运营看板走内置 FastAPI + SQLite，两者互补、可同时运行。
+
+### 观测体系对照
+
+| 场景 | 启动方式 | 观测 / 运维入口 | 说明 |
+| --- | --- | --- | --- |
+| **开发运维（主线）** | `langgraph dev`（:2024） | [smith.langchain.com](https://smith.langchain.com) + Studio | LangSmith trace / 评估 / Prompt 管理 |
+| **生产运维** | `python server/main.py`（:5173） | 内置面板 + `web/` 运营看板（:5174） | SQLite 节点级观测 + 7 个内置运维 API |
+
+### LangSmith 开发运维（主线）
+
+LangSmith 是云端 SaaS，**不需要单独启动服务**——配置 `.env` 后，由 `langgraph dev` 自动读取 `langgraph.json` 并上传 trace。
+
+```env
+# .env（LangSmith 开发运维）
+LANGSMITH_API_KEY=lsv2_xxx
+LANGSMITH_PROJECT=brainflow
+LANGSMITH_TRACING=true
+```
+
+```bash
+pip install -U "langgraph-cli[inmem]"
+langgraph dev          # :2024，终端输出 Studio 链接
+```
+
+启动成功后日志出现 `Successfully submitted metadata to LangSmith instance` 即表示已接入，随后可在 smith.langchain.com 查看 trace。
+
+> ⚠️ **内置服务（`python server/main.py`）不接 LangSmith**。内置 FastAPI 的观测链路是自研 `core/tracing.py` → SQLite；即使配好 key，内置服务也不会往 LangSmith 上传。开发调试请用 `langgraph dev` 这条链路。
+
+**Windows 注意**：若 `langgraph dev` 报 `UnicodeDecodeError: 'gbk' codec`，先执行：
+```powershell
+$env:PYTHONUTF8="1"; $env:PYTHONIOENCODING="utf-8"
+```
 
 ### CLI 模式（快速测试）
 
@@ -322,21 +362,16 @@ brainflow/
 
 > 💡 **运营看板（`web/`）**：React 19 + Vite + TypeScript + **Tailwind CSS 4 + shadcn/ui + Vercel AI SDK**（对齐 DeerFlow / DeepAgent 选型）。含总览看板 / 任务链路追踪（节点级观测）/ 工作流图（mermaid）/ AI 对话（SSE 流式）四个页面。dev server 默认代理 `/api` → 后端 :5173，需先启动后端。
 
-### LangGraph Server + Studio（调试后端）
+### LangGraph Server + Studio
 
-```bash
-pip install -U "langgraph-cli[inmem]"
-langgraph dev          # :2024，终端输出 Studio 链接
-```
-
-> ⚠️ **Agent Chat UI 连不上（Failed to fetch）**：请先启动 `langgraph dev`（:2024），再在 Chat UI 配置 `Deployment URL = http://127.0.0.1:2024` + `Assistant ID = agent`。
-
-### 一键脚本
+与上一节相同，一键脚本：
 
 ```bash
 bash scripts/dev_debug.sh            # langgraph dev + Studio 链接
 bash scripts/dev_debug.sh --chat-ui  # + Agent Chat UI
 ```
+
+> ⚠️ **Agent Chat UI 连不上（Failed to fetch）**：请先启动 `langgraph dev`（:2024），再配置 `Deployment URL = http://127.0.0.1:2024` + `Assistant ID = agent`。
 
 ### 测试
 
@@ -344,39 +379,6 @@ bash scripts/dev_debug.sh --chat-ui  # + Agent Chat UI
 | --- | --- |
 | `python tests/validate.py` | 图构建 / draw_mermaid / 工具节点 / API / 日志中间件 / 指标 |
 | `python tests/intents_eval.py` | 意图识别准确率（测试集 17 条，目标 ≥ 90%） |
-
----
-
-## 可观测性
-
-**双层观测，LangSmith 为主线**：
-
-| 层 | 能力 | 数据存储 | 启用方式 |
-| --- | --- | --- | --- |
-| **LangSmith**（主线） | 观测 / 评估 / Prompt 管理 / **Studio 调试搭配** | 官方 SaaS（云端） | `langgraph dev` 自动接入 |
-| **内置三件套** | 工作流定义图 + 节点级观测（状态/耗时/输入输出/token）+ 指标 + JSON 日志 | SQLite（`observe.db`） | 默认开启 |
-
-```env
-# .env（LangSmith 观测）
-LANGSMITH_API_KEY=lsv2_xxx
-LANGSMITH_PROJECT=brainflow
-LANGSMITH_TRACING=true
-```
-
-> ⚠️ **LangSmith 不需要单独"启动"**——它是云端 SaaS（`smith.langchain.com`），trace 上传到云端控制台查看，本地无法启动它。
->
-> ⚠️ **内置服务（`python server/main.py`）不接 LangSmith**。内置 FastAPI 服务的观测链路是自研 `core/tracing.py` → SQLite，全程不调用 LangGraph/LangSmith 的 tracing，因此即使 `.env` 配好 key，内置服务也不会往 LangSmith 上传数据。
->
-> LangSmith 只在**另一条链路**上生效：**先启动 `langgraph dev`（LangGraph Server，:2024）**，它会自动读取 `langgraph.json` + `.env` 并接入 LangSmith。启动成功后日志会出现 `Successfully submitted metadata to LangSmith instance`，表示 key 已生效。
-
-**两条链路的启动对照**：
-
-| 链路 | 启动命令 | 观测 | LangSmith 是否生效 |
-| --- | --- | --- | --- |
-| **内置面板**（生产） | `python server/main.py`（:5173） | 自研 SQLite 三件套 | ❌ 不接 |
-| **LangGraph Server**（调试） | `langgraph dev`（:2024） | LangSmith 云端 + Studio 图可视化 | ✅ 自动接入 |
-
-两个服务可同时运行、互不冲突：内置面板用于生产对话/看板，LangGraph Server 用于 Studio 调试图 + LangSmith 云端观测。
 
 ---
 
@@ -392,7 +394,7 @@ LANGSMITH_TRACING=true
 只需在 `tools/wechat_tools.py` 的 `TOOLS` 列表加一行注册（id/描述/触发词/例句），工作流图的条件边和前端自动扩展。
 
 **Q4：怎么用 LangSmith / 为什么 trace 没上传？**
-LangSmith 是云端 SaaS，不单独启动。它只在 `langgraph dev`（LangGraph Server）这条链路生效，且需先配置 `.env` 的 `LANGSMITH_API_KEY`。`python server/main.py` 的**内置服务不接 LangSmith**（用自研 SQLite 观测）。启动 `langgraph dev` 后看到 `Successfully submitted metadata to LangSmith instance` 即表示已接入，随后 trace 上传到 smith.langchain.com。
+LangSmith 是开发运维主线，仅在 `langgraph dev`（LangGraph Server，:2024）链路生效。请先配置 `.env` 的 `LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` / `LANGSMITH_TRACING`，再启动 `langgraph dev`；看到 `Successfully submitted metadata to LangSmith instance` 即表示已接入。`python server/main.py` 的内置服务**不接 LangSmith**，生产运维请用运营看板 + SQLite 观测。
 
 **Q5：Windows 启动 `langgraph dev` 报 `UnicodeDecodeError: 'gbk' codec`？**
 Windows 默认用 GBK 解码，而 LangGraph 源码用 `open()` 读 JSON。启动前先设 `$env:PYTHONUTF8="1"` 和 `$env:PYTHONIOENCODING="utf-8"` 再运行 `langgraph dev`。
@@ -408,7 +410,7 @@ Windows 默认用 GBK 解码，而 LangGraph 源码用 `open()` 读 JSON。启�
 | SSE 流式对话（/api/chat/stream） | — | ✅ 已完成 |
 | 运营看板前端（web/ React + shadcn/ui + AI SDK） | — | ✅ 已完成 |
 | 节点级可观测（状态/耗时/输入输出/token） | — | ✅ 已完成 |
-| LangSmith 观测接入（主线，langgraph dev 自动） | — | ✅ 就绪 |
+| LangSmith 开发运维接入（langgraph dev 自动） | — | ✅ 就绪 |
 | 意图识别评估优化（≥ 90%） | — | ✅ 实测 100%（17/17） |
 | 工具真实逻辑接入 | 替换 `_stub` 为业务实现 | ⏸ 业务侧 |
 | 微信接入 | WeChatBridge（weixin-acp） | ⏸ 留空 |
