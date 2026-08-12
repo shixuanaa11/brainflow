@@ -14,26 +14,29 @@ export function stepLabel(node: string, kind: WorkflowStep['kind'], tool?: strin
 
 export function applyStreamStep(steps: WorkflowStep[], ev: {
   node: string
-  kind: 'router' | 'tool' | 'summary'
+  kind: 'router' | 'tool' | 'summary' | 'qa'
   status: 'running' | 'done' | 'error'
   intent?: string
   tool?: string
   output?: string
   message?: string
+  async?: boolean
 }): WorkflowStep[] {
   const next = steps.map((s) => ({ ...s }))
 
   const upsert = (
     node: string,
-    kind: WorkflowStep['kind'],
+    kind: WorkflowStep['kind'] | 'qa',
     status: WorkflowStepStatus,
     extra?: Partial<WorkflowStep>,
   ) => {
+    const stepKind: WorkflowStep['kind'] =
+      kind === 'qa' ? 'summary' : kind
     const idx = next.findIndex((s) => s.node === node)
     const item: WorkflowStep = {
       node,
-      kind,
-      label: stepLabel(node, kind, ev.tool),
+      kind: stepKind,
+      label: stepLabel(node, stepKind, ev.tool),
       status,
       ...extra,
     }
@@ -69,7 +72,7 @@ export function applyStreamStep(steps: WorkflowStep[], ev: {
     }
   }
 
-  if (ev.kind === 'tool' && !next.some((s) => s.node === 'summary')) {
+  if (ev.kind === 'tool' && !ev.async && !next.some((s) => s.node === 'summary')) {
     next.push({
       node: 'summary',
       kind: 'summary',

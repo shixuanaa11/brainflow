@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { nanoid } from "nanoid";
 import type { DynamicToolUIPart } from "ai";
 import {
@@ -11,10 +12,13 @@ import {
 } from "lucide-react";
 import { ChatHistorySidebar } from "@/components/chat/chat-history-sidebar";
 import { ChatWelcome } from "@/components/chat/chat-welcome";
-import { streamChat } from "@/lib/api";
+import { streamChat, fetchSessionJobs, subscribeSessionEvents } from "@/lib/api";
 import { chatHistoryApi } from "@/lib/chat-history";
 import {
-  buildStoredPair,
+  applyJobEventToMessages,
+  buildStoredAssistant,
+  dedupeAssistantJobMessages,
+  reconcileSessionJobs,
   storedToChatMessages,
   type ChatMessage,
 } from "@/lib/chat-messages";
@@ -24,7 +28,7 @@ import {
   SUGGESTIONS,
   toToolPart,
 } from "@/lib/chat-workflow";
-import type { ChatSession, WorkflowStep } from "@/lib/types";
+import type { ChatSession, JobEvent, StreamEvent, WorkflowStep } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import {
   ChainOfThought,
@@ -63,6 +67,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const USER_ID = "web";
+const ACTIVE_SESSION_KEY = "brainflow:active-session";
 
 interface ToolRun {
   name: string;
@@ -73,10 +78,12 @@ function WorkflowPanel({
   steps,
   tools,
   isStreaming,
+  pendingJob,
 }: {
   steps: WorkflowStep[];
   tools: ToolRun[];
   isStreaming: boolean;
+  pendingJob?: boolean;
 }) {
   if (!steps.length && !tools.length) return null;
 
@@ -122,7 +129,7 @@ function WorkflowPanel({
         <Tool
           key={name}
           className="rounded-xl border-border/60"
-          defaultOpen={part.state === "output-available"}
+          defaultOpen={part.state === "output-available" || pendingJob}
         >
           <ToolHeader
             state={part.state}
@@ -132,14 +139,20 @@ function WorkflowPanel({
           />
           <ToolContent>
             <ToolInput input={part.input} />
-            <ToolOutput
-              errorText={part.errorText}
-              output={
-                part.output ? (
-                  <MessageResponse>{String(part.output)}</MessageResponse>
-                ) : undefined
-              }
-            />
+            {pendingJob && part.state === "input-available" ? (
+              <Shimmer className="px-4 pb-3 text-sm text-muted-foreground">
+                后台执行中，完成后会自动更新…
+              </Shimmer>
+            ) : (
+              <ToolOutput
+                errorText={part.errorText}
+                output={
+                  part.output ? (
+                    <MessageResponse>{String(part.output)}</MessageResponse>
+                  ) : undefined
+                }
+              />
+            )}
           </ToolContent>
         </Tool>
       ))}
@@ -148,6 +161,7 @@ function WorkflowPanel({
 }
 
 export default function ChatPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -156,8 +170,11 @@ export default function ChatPage() {
   );
   const [draft, setDraft] = useState("");
   const abortRef = useRef<AbortController | null>(null);
+  const sessionEventsRef = useRef<AbortController | null>(null);
   const msgIdRef = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
+  const graphStreamingRef = useRef(false);
+  const [pendingJobCount, setPendingJobCount] = useState(0);
 
   const nextId = () => `msg-${msgIdRef.current++}-${nanoid()}`;
 
@@ -178,30 +195,120 @@ export default function ChatPage() {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
 
+  const countPendingJobs = useCallback((msgs: ChatMessage[]) => {
+    return msgs.filter((m) => m.pendingJob).length;
+  }, []);
+
+  const handleJobEvent = useCallback(
+    (ev: StreamEvent | JobEvent) => {
+      if (ev.type === "heartbeat") return;
+      if (
+        ev.type !== "snapshot" &&
+        ev.type !== "job" &&
+        ev.type !== "job_done" &&
+        ev.type !== "job_error"
+      ) {
+        return;
+      }
+      setMessages((prev) => {
+        const next = applyJobEventToMessages(ev, prev, {
+          graphStreaming: graphStreamingRef.current,
+        });
+        setPendingJobCount(countPendingJobs(next));
+        return next;
+      });
+      if (ev.type === "job_done" || ev.type === "job_error") {
+        void refreshSessions();
+      }
+    },
+    [countPendingJobs, refreshSessions],
+  );
+
+  useEffect(() => {
+    if (!sessionId) {
+      setPendingJobCount(0);
+      return;
+    }
+    sessionEventsRef.current?.abort();
+    const controller = new AbortController();
+    sessionEventsRef.current = controller;
+
+    void subscribeSessionEvents(sessionId, handleJobEvent, controller.signal, {
+      reconnect: true,
+    }).catch((e) => {
+      if ((e as Error).name !== "AbortError") {
+        // 静默失败
+      }
+    });
+
+    return () => controller.abort();
+  }, [sessionId, handleJobEvent]);
+
   const handleNewChat = useCallback(() => {
     abortRef.current?.abort();
+    sessionEventsRef.current?.abort();
+    sessionStorage.removeItem(ACTIVE_SESSION_KEY);
+    setSearchParams({}, { replace: true });
     setSessionId(null);
     setMessages([]);
     setDraft("");
     setStatus("ready");
+    setPendingJobCount(0);
   }, []);
 
-  const handleSelectSession = useCallback(
+  const loadSessionById = useCallback(
     async (id: string) => {
-      if (status !== "ready" || id === sessionId) return;
       abortRef.current?.abort();
       try {
-        const detail = await chatHistoryApi.getSession(id);
+        const [detail, jobs] = await Promise.all([
+          chatHistoryApi.getSession(id),
+          fetchSessionJobs(id, false),
+        ]);
         setSessionId(id);
-        setMessages(storedToChatMessages(detail.messages));
+        const loaded = reconcileSessionJobs(
+          storedToChatMessages(detail.messages),
+          jobs,
+        );
+        setMessages(loaded);
+        setPendingJobCount(countPendingJobs(loaded));
         setDraft("");
         setStatus("ready");
       } catch {
         // ignore
       }
     },
-    [sessionId, status],
+    [countPendingJobs],
   );
+
+  const handleSelectSession = useCallback(
+    async (id: string) => {
+      if (status !== "ready" || id === sessionId) return;
+      await loadSessionById(id);
+    },
+    [sessionId, status, loadSessionById],
+  );
+
+  useEffect(() => {
+    const fromUrl = searchParams.get("session");
+    const fromStore = sessionStorage.getItem(ACTIVE_SESSION_KEY);
+    const sid = fromUrl || fromStore;
+    if (sid && sid !== sessionId) {
+      void loadSessionById(sid);
+    }
+    // 仅首屏恢复会话
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!sessionId) {
+      sessionStorage.removeItem(ACTIVE_SESSION_KEY);
+      return;
+    }
+    sessionStorage.setItem(ACTIVE_SESSION_KEY, sessionId);
+    if (searchParams.get("session") !== sessionId) {
+      setSearchParams({ session: sessionId }, { replace: true });
+    }
+  }, [sessionId, searchParams, setSearchParams]);
 
   const handleDeleteSession = useCallback(
     async (id: string) => {
@@ -257,8 +364,11 @@ export default function ChatPage() {
     let finalContent = "";
     let finalSteps: WorkflowStep[] = [];
     let finalTools: ToolRun[] = [];
+    let jobId: string | undefined;
+    let isAsyncJob = false;
 
     try {
+      graphStreamingRef.current = true;
       const sid = await ensureSession(text);
 
       await streamChat(
@@ -280,32 +390,25 @@ export default function ChatPage() {
               ),
             );
           } else if (ev.type === "step") {
+            if (ev.async && ev.job_id) {
+              jobId = ev.job_id;
+              isAsyncJob = true;
+            }
             setMessages((prev) =>
               prev.map((m) => {
                 if (m.key !== aiMsg.key) return m;
                 const steps = applyStreamStep(m.steps ?? [], ev);
                 let tools = m.tools ?? [];
 
-                if (ev.kind === "tool" && ev.status === "done" && ev.tool) {
+                if (ev.kind === "tool" && ev.tool) {
+                  const isRunning =
+                    ev.status === "running" ||
+                    (ev.async && ev.status === "done");
                   const part = toToolPart(
                     ev.tool,
-                    "output-available",
+                    isRunning ? "input-available" : "output-available",
                     { query: userInput },
                     ev.output,
-                  );
-                  tools = [
-                    ...tools.filter((t) => t.name !== ev.tool),
-                    { name: ev.tool, part },
-                  ];
-                } else if (
-                  ev.kind === "tool" &&
-                  ev.status === "running" &&
-                  ev.tool
-                ) {
-                  const part = toToolPart(
-                    ev.tool,
-                    "input-available",
-                    { query: userInput },
                   );
                   tools = [
                     ...tools.filter((t) => t.name !== ev.tool),
@@ -315,8 +418,36 @@ export default function ChatPage() {
 
                 finalSteps = steps;
                 finalTools = tools;
-                return { ...m, steps, tools };
+                if (ev.async && ev.job_id && ev.output) {
+                  finalContent = ev.output;
+                }
+                return {
+                  ...m,
+                  steps,
+                  tools,
+                  jobId: jobId ?? m.jobId,
+                  pendingJob: isAsyncJob,
+                };
               }),
+            );
+          } else if (ev.type === "job") {
+            jobId = ev.job_id;
+            isAsyncJob = true;
+            setMessages((prev) =>
+              dedupeAssistantJobMessages(
+                prev.map((m) =>
+                  m.key === aiMsg.key
+                    ? {
+                        ...m,
+                        jobId: ev.job_id,
+                        pendingJob: ["queued", "submitted", "running"].includes(
+                          ev.status,
+                        ),
+                        jobStatus: ev.status,
+                      }
+                    : m,
+                ),
+              ),
             );
           } else if (ev.type === "reply") {
             finalContent += ev.reply;
@@ -361,27 +492,46 @@ export default function ChatPage() {
           }
         },
         controller.signal,
+        sid,
       );
       finalSteps = finalSteps.map((s) =>
         s.status === "running" ? { ...s, status: "done" as const } : s,
       );
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.key === aiMsg.key
-            ? { ...m, isContentComplete: true, steps: finalSteps }
-            : m,
-        ),
-      );
+      setMessages((prev) => {
+        const next = dedupeAssistantJobMessages(
+          prev.map((m) =>
+            m.key === aiMsg.key
+              ? {
+                  ...m,
+                  isContentComplete: true,
+                  steps: finalSteps,
+                  jobId,
+                  pendingJob: isAsyncJob,
+                  versions: m.versions.map((v) => ({
+                    ...v,
+                    content: v.content || finalContent,
+                  })),
+                }
+              : m,
+          ),
+        );
+        setPendingJobCount(countPendingJobs(next));
+        return next;
+      });
 
-      await chatHistoryApi.appendMessages(
-        sid,
-        buildStoredPair(text, {
-          content: finalContent,
-          steps: finalSteps,
-          tools: finalTools,
-        }),
-      );
       await refreshSessions();
+
+      if (!isAsyncJob) {
+        await chatHistoryApi.appendMessages(
+          sid,
+          buildStoredAssistant({
+            content: finalContent,
+            steps: finalSteps,
+            tools: finalTools,
+          }),
+        );
+        await refreshSessions();
+      }
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
         finalContent = finalContent || "请求失败";
@@ -400,22 +550,29 @@ export default function ChatPage() {
           ),
         );
         const sid = sessionIdRef.current;
-        if (sid) {
+        if (sid && !isAsyncJob) {
           try {
             await chatHistoryApi.appendMessages(
               sid,
-              buildStoredPair(text, { content: finalContent, steps: finalSteps, tools: finalTools }),
+              buildStoredAssistant({
+                content: finalContent,
+                steps: finalSteps,
+                tools: finalTools,
+              }),
             );
             await refreshSessions();
           } catch {
             // ignore persist error
           }
+        } else if (sid && isAsyncJob) {
+          await refreshSessions();
         }
       }
     } finally {
+      graphStreamingRef.current = false;
       setStatus("ready");
     }
-  }, [ensureSession, refreshSessions]);
+  }, [ensureSession, refreshSessions, countPendingJobs]);
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
@@ -438,11 +595,13 @@ export default function ChatPage() {
   useEffect(
     () => () => {
       abortRef.current?.abort();
+      sessionEventsRef.current?.abort();
     },
     [],
   );
 
   const isBusy = status !== "ready";
+  const hasBackgroundJobs = pendingJobCount > 0;
 
   return (
     <div className="relative flex min-h-0 flex-1">
@@ -472,13 +631,17 @@ export default function ChatPage() {
             </p>
           </div>
         </div>
-        {isBusy && (
+        {(isBusy || hasBackgroundJobs) && (
           <Badge className="gap-1.5" variant="secondary">
             <span className="relative flex size-2">
               <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary/40 opacity-75" />
               <span className="relative inline-flex size-2 rounded-full bg-primary" />
             </span>
-            {status === "streaming" ? "执行中" : "提交中"}
+            {isBusy
+              ? status === "streaming"
+                ? "执行中"
+                : "提交中"
+              : `${pendingJobCount} 个后台任务运行中`}
           </Badge>
         )}
       </header>
@@ -502,6 +665,7 @@ export default function ChatPage() {
                     (message.tools?.length ?? 0) > 0) && (
                     <WorkflowPanel
                       isStreaming={!message.isContentComplete}
+                      pendingJob={message.pendingJob}
                       steps={message.steps ?? []}
                       tools={message.tools ?? []}
                     />

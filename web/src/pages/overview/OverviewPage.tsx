@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/layout/page-header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   ChartContainer,
   ChartTooltip,
@@ -13,7 +14,8 @@ import {
   type ChartConfig,
 } from '@/components/ui/chart'
 import { cn, formatNumber } from '@/lib/utils'
-import { Activity, Coins, AlertTriangle, Wrench, Server } from 'lucide-react'
+import { Activity, Coins, AlertTriangle, Wrench, Server, KanbanSquare } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 const CHART_COLORS = [
   'hsl(var(--chart-1))',
@@ -130,7 +132,7 @@ export default function OverviewPage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
         <StatCard label="总调用" value={formatNumber(board.total_calls)} icon={Activity} />
         <StatCard label="Token 消耗" value={formatNumber(board.total_tokens)} icon={Coins} />
         <StatCard
@@ -140,7 +142,38 @@ export default function OverviewPage() {
           sub={`错误率 ${errorRatePct}%`}
         />
         <StatCard label="活跃工具" value={formatNumber(board.active_tools)} icon={Wrench} />
+        <Link to="/jobs" className="block">
+          <StatCard
+            label="进行中任务"
+            value={formatNumber(board.tool_jobs?.active ?? 0)}
+            icon={KanbanSquare}
+            sub={
+              board.tool_jobs?.total
+                ? `累计 ${formatNumber(board.tool_jobs.total)} 个 job`
+                : '异步工具任务'
+            }
+            className="transition-colors hover:border-primary/40"
+          />
+        </Link>
       </div>
+
+      {(board.tool_jobs?.active ?? 0) > 0 && (
+        <Card className="border-amber-500/30 bg-amber-500/5">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+            <div>
+              <p className="text-sm font-medium">
+                {board.tool_jobs?.active} 个工具任务正在后台执行
+              </p>
+              <p className="text-xs text-muted-foreground">
+                可在工具任务看板查看全队列状态，或在 AI 对话中查看单会话进度
+              </p>
+            </div>
+            <Button asChild size="sm" variant="outline">
+              <Link to="/jobs">打开工具任务看板</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">

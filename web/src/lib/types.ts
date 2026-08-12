@@ -9,6 +9,13 @@ export interface BoardOverview {
   active_tools: number
   top_tools: [string, number][]
   status: 'healthy' | 'degraded'
+  tool_jobs?: ToolJobSummary
+}
+
+export interface ToolJobSummary {
+  total: number
+  active: number
+  by_status: Record<string, number>
 }
 
 export interface Span {
@@ -81,15 +88,84 @@ export type StreamEvent =
   | {
       type: 'step'
       node: string
-      kind: 'router' | 'tool' | 'summary'
+      kind: 'router' | 'tool' | 'summary' | 'qa'
       status: 'running' | 'done' | 'error'
       intent?: string
       tool?: string
       output?: string
       message?: string
+      async?: boolean
+      job_id?: string
     }
   | { type: 'reply'; reply: string }
   | { type: 'error'; message: string }
+  | JobEvent
+  | { type: 'snapshot'; jobs: ToolJob[] }
+  | { type: 'heartbeat'; ts?: number }
+
+export type JobStatus =
+  | 'queued'
+  | 'submitted'
+  | 'running'
+  | 'done'
+  | 'error'
+  | 'timeout'
+  | 'cancelled'
+
+export interface ToolJob {
+  job_id: string
+  session_id: string
+  tool_name: string
+  status: JobStatus
+  progress: number
+  result?: string
+  error?: string
+  result_ref?: string
+  user_query?: string
+  created_at?: number
+  updated_at?: number
+}
+
+export type JobEvent =
+  | {
+      type: 'job'
+      job_id: string
+      session_id: string
+      tool: string
+      status: JobStatus
+      progress: number
+      result?: string
+      error?: string
+      result_ref?: string
+      ts?: number
+      replay?: boolean
+    }
+  | {
+      type: 'job_done'
+      job_id: string
+      session_id: string
+      tool: string
+      status: 'done'
+      progress: number
+      result?: string
+      error?: string
+      result_ref?: string
+      ts?: number
+      replay?: boolean
+    }
+  | {
+      type: 'job_error'
+      job_id: string
+      session_id: string
+      tool: string
+      status: 'error' | 'timeout' | 'cancelled'
+      progress: number
+      result?: string
+      error?: string
+      result_ref?: string
+      ts?: number
+      replay?: boolean
+    }
 
 export type WorkflowStepStatus = 'pending' | 'running' | 'done' | 'error'
 
@@ -122,6 +198,9 @@ export interface StoredChatMessage {
   content: string
   created_at?: number
   meta?: {
+    job_id?: string
+    job_status?: JobStatus
+    tool?: string
     steps?: WorkflowStep[]
     tools?: Array<{
       name: string
@@ -135,4 +214,10 @@ export interface StoredChatMessage {
 
 export interface ChatSessionDetail extends ChatSession {
   messages: StoredChatMessage[]
+}
+
+export interface ToolJobsResponse {
+  jobs: ToolJob[]
+  count: number
+  summary?: ToolJobSummary
 }

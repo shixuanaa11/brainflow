@@ -1,11 +1,12 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { LayoutDashboard, GitBranch, Workflow, MessageSquare, Brain } from 'lucide-react'
+import { LayoutDashboard, GitBranch, Workflow, MessageSquare, Brain, KanbanSquare } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Separator } from '@/components/ui/separator'
 
 const nav = [
   { to: '/', icon: LayoutDashboard, label: '总览看板', end: true },
+  { to: '/jobs', icon: KanbanSquare, label: '工具任务' },
   { to: '/traces', icon: GitBranch, label: '任务链路' },
   { to: '/graph', icon: Workflow, label: '工作流图' },
   { to: '/chat', icon: MessageSquare, label: 'AI 对话' },
