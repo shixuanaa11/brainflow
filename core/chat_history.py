@@ -160,6 +160,47 @@ class ChatHistory:
                 )
         return cur.rowcount > 0
 
+    def update_assistant_by_job_id(
+        self,
+        session_id: str,
+        job_id: str,
+        content: str,
+        meta: dict | None = None,
+    ) -> bool:
+        """更新同一 job 的受理 assistant 消息（LangGraph 一轮一条 AIMessage）"""
+        now = time.time()
+        with _lock:
+            with self._conn:
+                rows = self._conn.execute(
+                    "SELECT id, meta FROM chat_messages "
+                    "WHERE session_id=? AND role='assistant' ORDER BY created_at, id",
+                    (session_id,),
+                ).fetchall()
+                for mid, meta_text in rows:
+                    meta_obj: dict = {}
+                    if meta_text:
+                        try:
+                            meta_obj = json.loads(meta_text)
+                        except json.JSONDecodeError:
+                            pass
+                    if meta_obj.get("job_id") != job_id:
+                        continue
+                    merged = {**meta_obj, **(meta or {})}
+                    self._conn.execute(
+                        "UPDATE chat_messages SET content=?, meta=? WHERE id=?",
+                        (
+                            content,
+                            json.dumps(merged, ensure_ascii=False),
+                            mid,
+                        ),
+                    )
+                    self._conn.execute(
+                        "UPDATE chat_sessions SET updated_at=? WHERE session_id=?",
+                        (now, session_id),
+                    )
+                    return True
+        return False
+
 
 _history: ChatHistory | None = None
 

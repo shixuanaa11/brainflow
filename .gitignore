@@ -16,6 +16,7 @@ env/
 .env
 .env.local
 .env.*.local
+config/llm_profiles.yaml
 
 # ---- IDE / OS ----
 .idea/

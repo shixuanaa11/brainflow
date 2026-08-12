@@ -15,6 +15,13 @@ TOOL_HANDLERS = {
     "info_hunt": query_info_hunt,
 }
 
+ASYNC_TOOLS = {"info_hunt", "weather"}
+
+ASYNC_JOB_TIMEOUT_SEC = {
+    "info_hunt": 600,
+    "weather": 120,
+}
+
 # (id, 描述, 触发词, 例句, direct_reply, router_hint, router_exclude)
 TOOLS = [
     ("weather", "天气工具",
@@ -108,5 +115,10 @@ def register_tools():
     reg = get_registry()
     for name, desc, keywords, examples, direct_reply, hint, exclude in TOOLS:
         fn = TOOL_HANDLERS.get(name, _stub(name))
-        reg.register(name, fn, desc=desc, keywords=keywords, examples=examples,
-                     direct_reply=direct_reply, router_hint=hint, router_exclude=exclude)
+        reg.register(
+            name, fn, desc=desc, keywords=keywords, examples=examples,
+            direct_reply=direct_reply, router_hint=hint, router_exclude=exclude,
+            async_execution=name in ASYNC_TOOLS,
+            job_timeout_sec=ASYNC_JOB_TIMEOUT_SEC.get(name, 300),
+            job_max_attempts=2 if name in ASYNC_TOOLS else 1,
+        )

@@ -40,13 +40,29 @@ class LLMClient:
     def _resolve_endpoint(self) -> tuple[str, str]:
         return LLM_BASE_URL or "", LLM_API_KEY or ""
 
+    def has_credentials(self) -> bool:
+        _, api_key = self._resolve_endpoint()
+        return bool(api_key.strip())
+
     def warmup(self):
         """预热 HTTP 连接（避免首请求额外握手耗时计入 router）"""
+        if not self.has_credentials():
+            log.warning(
+                "LLM API key 未配置，跳过 warmup。"
+                "请在 config/llm_profiles.yaml 为 profile %s 设置 api_key",
+                self._model,
+            )
+            return
         self._ensure_client()
 
     def _ensure_client(self):
         if self._client is None:
             base_url, api_key = self._resolve_endpoint()
+            if not api_key.strip():
+                raise RuntimeError(
+                    f"LLM API key 未配置。请在 config/llm_profiles.yaml 中为 "
+                    f"profile '{self._model}' 设置 api_key"
+                )
             self._resolved_base_url = base_url
             self._client = OpenAI(base_url=base_url or None, api_key=api_key)
             log.info(json.dumps({

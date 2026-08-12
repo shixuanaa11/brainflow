@@ -65,7 +65,7 @@ def test_api():
     check("readyz", c.get("/readyz").json()["status"] == "ready")
     check("board API", "total_calls" in c.get("/api/board").json())
     check("graphs API", "mermaid" in c.get("/api/graphs").json())
-    check("前端页面", c.get("/").status_code == 200)
+    check("API 根路径", c.get("/").json().get("service") == "BrainFlow")
 
 
 def test_stats():

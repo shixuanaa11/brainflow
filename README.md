@@ -12,13 +12,13 @@
 | 项 | 内容 |
 | --- | --- |
 | **作者** | 黄宇然（huangyuran） |
-| **版本** | v1.2（2026-08-11） |
+| **版本** | v1.2（2026-08-12） |
 | **技术栈** | Python 3.11+ · LangGraph 1.x · FastAPI · SQLite · React 19 + Vite |
 | **代码位置** | `D:\code\brainflow` |
-| **相关文档** | [v1.0 方案总结](docs/V1.0_SUMMARY.md)（完整方案文档见 `docs/`） |
+| **相关文档** | [v1.0 方案总结](docs/V1.0_SUMMARY.md) · [异步任务架构 v1.2](docs/async-job-architecture.md) · [DEBUG.md](docs/DEBUG.md) |
 | **协议** | 专有 · © 2026 黄宇然，保留所有权利 |
 
-> 详细方案文档见 `docs/`：`v3.1_architecture_final.md`（架构级）· `v3.1_implementation_final.md`（工程级）· `V1.0_SUMMARY.md`（v1.0 总结）· `DEBUG.md`（调试指南）· `frontend_options_2026.md`（前端选型）。
+> 详细方案文档见 `docs/`：`async-job-architecture.md`（**v1.2 异步 Job 权威**）· `V1.0_SUMMARY.md` · `DEBUG.md` · `frontend_options_2026.md`。
 
 ---
 
@@ -51,11 +51,11 @@ BrainFlow（智脑流）是基于 **标准 LangGraph 架构** 的企业级任务
 
 **LangGraph 官方生态（一套）**：`LangGraph 框架` + `LangSmith（观测/评估/Studio 调试）` + `Agent Chat UI（前端）`。
 
-**BrainFlow 的采用**：采用官方**框架 + Server**做地基；**以 LangSmith 为主线**（观测/评估/Studio 调试搭配）；调试前端用 Agent Chat UI（本地子项目）；**在此基础上自研两套贴合业务的前端**——轻量内置面板（`:5173`）+ 完整运营看板（`web/`，`:5174`）——官方生态做地基，自研前端做产品。
+**BrainFlow 的采用**：采用官方**框架 + Server**做地基；**以 LangSmith 为主线**（观测/评估/Studio 调试搭配）；调试前端用 Agent Chat UI（本地子项目）；**自研运营看板**（`web/`，`:5174`）对接 FastAPI —— 官方生态做地基，自研前端做产品。
 
 ```
 官方（主线）：LangGraph 框架 + Server(:2024) + LangSmith/Studio + Chat UI(调试)
-自研：内置面板(:5173) + 运营看板 web/(:5174) + SSE 流式对话 + 节点级观测 + FastAPI
+自研：运营看板 web/(:5174) + SSE 流式对话 + Job 看板 + 节点级观测 + FastAPI(:5173)
 ```
 
 ---
@@ -66,7 +66,8 @@ BrainFlow（智脑流）是基于 **标准 LangGraph 架构** 的企业级任务
 | --- | --- |
 | **标准 LangGraph 工作流** | 一个 StateGraph：`router（意图识别）→ 条件边分发 → 14 工具节点 → summary（LLM 总结）→ 回复` |
 | **任务分配中枢** | 意图识别后由条件边自动分发到对应工具节点；加工具 = 注册一行，图自动扩展 |
-| **SSE 流式对话** | `/api/chat/stream` 按节点推送 router / tool / summary 进度，summary 产出时实时返回 reply |
+| **SSE 流式对话** | `/api/chat/stream`（Run Stream）+ `/api/chat/sessions/{id}/events`（Join Stream）；异步工具走 Job 看板 |
+| **异步工具 Job** | `info_hunt` / `weather` 等 `ASYNC_TOOLS`：submit → 后台执行 → 看板 `/jobs` + 对话同条 assistant 更新 |
 | **运营看板前端** | `web/` 自研 React 看板：总览 / 链路追踪 / 工作流图 / AI 对话（SSE 流式） |
 | **意图识别准确性** | 动态工具清单注入 + few-shot 示例 + 白名单校验防幻觉（评估脚本目标 ≥ 90%） |
 | **统一 API 接口层** | FastAPI：7 个运维 API（对齐 Hermes）+ 同步/流式对话 + 工作流图 + 健康检查 |
@@ -145,7 +146,7 @@ flowchart TB
     ENTRY[接入层<br/>CLI · HTTP · 微信（待接）]
     WF[工作流层 src/graph.py<br/>router → 条件边分发 → 14 工具节点 → summary<br/>MessagesState · checkpointer]
     CORE[核心层 core/<br/>router 意图识别 · registry 注册表 · llm 统一入口<br/>tracing · stats · logs]
-    API[服务层 api/main.py<br/>FastAPI :5173 · 7 API · 前端静态页 · 日志中间件]
+    API[服务层 api/main.py<br/>FastAPI :5173 · REST/SSE · 日志中间件]
     OBS[可观测层<br/>LangSmith 主线 + 内置三件套 SQLite]
     ENTRY --> WF
     WF --> CORE
@@ -195,16 +196,16 @@ python -m venv .venv
 
 ```bash
 cp .env.example .env
+cp config/llm_profiles.example.yaml config/llm_profiles.yaml
 ```
 
-编辑 `.env`，至少填写 LLM 配置（详细字段见 [配置说明](#配置说明)）：
+编辑 `config/llm_profiles.yaml`，为各模型填写 `api_key` / `base_url`；`.env` 只需指定当前使用的 profile 名：
 
 ```ini
 LLM_MODEL=qwen3.7-flash
-LLM_API_KEY=your-api-key
 ```
 
-> 各模型的 `base_url` / `api_key` 在 `config/llm_profiles.yaml` 中维护；切换模型只改 `LLM_MODEL`。
+> 密钥与 endpoint 均在 `config/llm_profiles.yaml` 维护（已加入 `.gitignore`）；切换模型只改 `.env` 的 `LLM_MODEL`。
 
 ### 3. 启动
 
@@ -214,11 +215,11 @@ LLM_API_KEY=your-api-key
 
 启动成功后：
 
-- **内置前端**：http://localhost:5173（对话 / 工作流图 / 看板，SSE 流式对话）
-- **Swagger 文档**：http://localhost:5173/docs
+- **API / Swagger**：http://localhost:5173 · http://localhost:5173/docs
+- **运营看板（UI）**：见下方 `web/` 启动（默认 :5174）
 - 日志输出 JSON 结构化（每请求带 trace_id）
 
-**（可选）启动运营看板**——需先启动后端，再另开终端：
+**启动运营看板**——需先启动后端，再另开终端：
 
 ```bash
 cd web && npm install && npm run dev
@@ -241,11 +242,10 @@ cd web && npm install && npm run dev
 brainflow/
 ├── src/graph.py          ★ 标准工作流图（router + 条件边 + 工具节点 + summary 总结节点）
 ├── api/                  ★ API 接口层（FastAPI）
-│   ├── main.py               7 API + /api/chat + /api/chat/stream + /api/graphs + 健康检查
-│   └── static/index.html     内置前端（对话 SSE 流式 / 工作流图 / 看板 三标签页）
+│   └── main.py               REST/SSE + /docs + 健康检查（UI 见 web/）
 ├── config/
 │   ├── settings.py       全局配置（.env）
-│   ├── profiles.py       LLM Profile 加载（${ENV} 注入）
+│   ├── profiles.py       LLM Profile 加载（llm_profiles.yaml）
 │   └── prompts.py        意图识别 Router Prompt 全文
 ├── prompts/              ★ 提示词目录（各节点提示词按模块组织）
 │   ├── __init__.py           统一导出
@@ -313,9 +313,6 @@ brainflow/
 | --- | --- | --- | --- |
 | `LLM_MODEL` | ✅ | `qwen3.7-flash` | 当前模型 profile 名（见 `config/llm_profiles.yaml`） |
 | `LLM_ENABLE_THINKING` | 否 | `false` | 是否开启模型 thinking 模式 |
-| `LLM_API_KEY` | ✅* | — | Dashscope / 通义等（yaml 中 `${LLM_API_KEY}` 引用） |
-| `LLM_API_KEY_MINIMAX` | 否 | — | MiniMax profile 专用 key |
-| `LLM_API_KEY_DEEPSEEK` | 否 | — | DeepSeek profile 专用 key |
 | `API_HOST` | 否 | `0.0.0.0` | API 监听地址 |
 | `API_PORT` | 否 | `5173` | API 端口 |
 | `DB_DIR` | 否 | `data/` | 观测数据库目录（可覆盖到可写目录） |
@@ -323,6 +320,14 @@ brainflow/
 | `LANGSMITH_PROJECT` | 否 | `brainflow` | LangSmith 项目名 |
 | `LANGSMITH_TRACING` | 否 | `true` | 是否开启 trace 上传 |
 | `WECHAT_ACP_PATH` | 否 | — | 微信接入（留空 = 未启用，后续实现） |
+
+`config/llm_profiles.yaml`（从 `llm_profiles.example.yaml` 复制，**勿提交 git**）：
+
+| 字段 | 说明 |
+| --- | --- |
+| `model` | 模型 ID（发给 API 的名称） |
+| `base_url` | OpenAI 兼容 endpoint |
+| `api_key` | 该 profile 专用密钥 |
 
 ---
 
@@ -335,7 +340,7 @@ brainflow/
 | 场景 | 启动方式 | 观测 / 运维入口 | 说明 |
 | --- | --- | --- | --- |
 | **开发运维（主线）** | `langgraph dev`（:2024） | [smith.langchain.com](https://smith.langchain.com) + Studio | LangSmith trace / 评估 / Prompt 管理 |
-| **生产运维** | `python server/main.py`（:5173） | 内置面板 + `web/` 运营看板（:5174） | SQLite 节点级观测 + 7 个内置运维 API |
+| **生产运维** | `python server/main.py`（:5173，纯 API） | `web/` 运营看板（:5174） | SQLite 观测 + Job 看板 + REST/SSE |
 
 ### LangSmith 开发运维（主线）
 
@@ -372,10 +377,9 @@ $env:PYTHONUTF8="1"; $env:PYTHONIOENCODING="utf-8"
 
 | # | 前端 | 类型 | 场景 | 启动 |
 | --- | --- | --- | --- | --- |
-| 1 | 内置面板（`api/static/`） | 自研 | 生产（对话/图/看板） | `python server/main.py` |
-| 2 | **运营看板（`web/`）** | 自研 | 上线效果 · 追踪链路 · 工作流图 | `cd web && pnpm/npm install && npm run dev`（:5174） |
-| 3 | Agent Chat UI（`chat-ui/`） | 官方脚手架 | 调试聊天 | `cd chat-ui && pnpm install && pnpm dev`（:3000） |
-| 4 | 工作流图标签页（内置） | 自研 | 调试图可视化 | `draw_mermaid()` + mermaid.js 本地渲染 |
+| 1 | 运营看板（`web/`） | 自研 | 生产（对话/图/看板/Job） | `cd web && npm run dev`（:5174） |
+| 2 | Agent Chat UI（`chat-ui/`） | 官方脚手架 | 调试聊天 | `cd chat-ui && pnpm install && pnpm dev`（:3000） |
+| 3 | LangGraph Studio | 官方 IDE | 调试图可视化 | `langgraph dev` |
 
 > 💡 **运营看板（`web/`）**：React 19 + Vite + TypeScript + **Tailwind CSS 4 + shadcn/ui + Vercel AI SDK**（对齐 DeerFlow / DeepAgent 选型）。含总览看板 / 任务链路追踪（节点级观测）/ 工作流图（mermaid）/ AI 对话（SSE 流式）四个页面。dev server 默认代理 `/api` → 后端 :5173，需先启动后端。
 
@@ -432,7 +436,7 @@ Windows 默认用 GBK 解码，而 LangGraph 源码用 `open()` 读 JSON。启�
 | 工具真实逻辑接入 | 替换 `_stub` 为业务实现 | ⏸ 业务侧 |
 | 微信接入 | WeChatBridge（weixin-acp） | ⏸ 留空 |
 | checkpointer 生产化 | MemorySaver → SqliteSaver | ⏸ 待做 |
-| 前端深化 | 运营看板功能完善 · 内置面板与 web/ 能力对齐 | 📋 进行中 |
+| 前端深化 | 运营看板功能完善 | 📋 进行中 |
 
 ---
 

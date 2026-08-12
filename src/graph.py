@@ -13,6 +13,7 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from config.prompts import GENERAL_QA_SYSTEM_PROMPT
+from core.job_service import get_job_service
 from core.registry import get_registry
 from core.router import RouterAgent
 from core.stats import get_stats
@@ -28,6 +29,8 @@ sys.path.insert(0, str(ROOT))
 class WorkflowState(MessagesState):
     intent: str        # router 节点写入：意图识别结果
     tool_output: str   # 工具节点写入：工具返回
+    session_id: str    # 对话会话 ID（异步 job 关联）
+    job_id: str        # 异步工具提交后的 job_id
 
 
 def _last_user_text(state: dict) -> str:
@@ -80,6 +83,45 @@ def make_tool_node(fn: callable, name: str):
                 "tool_output": err,
                 "messages": [ToolMessage(content=err, name=name, tool_call_id=f"tool_{name}")],
             }
+    return node
+
+
+def make_async_tool_node(fn: callable, name: str):
+    """异步工具节点：提交 job 后立即返回受理回执，跳过 summary"""
+    def node(state: dict) -> dict:
+        text = _last_user_text(state)
+        session_id = state.get("session_id") or ""
+        t0 = time.time()
+        node_name = f"tool_{name}"
+        get_tracer().set_current_node(node_name)
+
+        job = get_job_service().submit(
+            tool_name=name,
+            session_id=session_id,
+            user_query=text,
+            trace_id=get_tracer().current_trace_id(),
+        )
+
+        from core.job_delivery import async_receipt_text
+        receipt = async_receipt_text(name, job["job_id"])
+        get_tracer().add_span(
+            node_name, "tool", time.time() - t0,
+            status="ok", input_text=text, output_text=receipt,
+            detail=f"async submitted {job['job_id']}",
+        )
+        get_stats().record(name, latency=time.time() - t0)
+        return {
+            "tool_output": receipt,
+            "job_id": job["job_id"],
+            "messages": [
+                ToolMessage(
+                    content=f"[已提交] {job['job_id']}",
+                    name=name,
+                    tool_call_id=f"tool_{name}",
+                ),
+                AIMessage(content=receipt),
+            ],
+        }
     return node
 
 
@@ -165,9 +207,14 @@ def _build_state_graph() -> StateGraph:
         if name == "general_qa":
             continue
         node_id = f"tool_{name}"
-        g.add_node(node_id, make_tool_node(reg.get(name), name))
+        meta = reg.meta(name)
+        if meta.get("async_execution"):
+            g.add_node(node_id, make_async_tool_node(reg.get(name), name))
+            g.add_edge(node_id, END)
+        else:
+            g.add_node(node_id, make_tool_node(reg.get(name), name))
+            g.add_edge(node_id, "summary")
         path_map[name] = node_id
-        g.add_edge(node_id, "summary")
 
     def route_by_intent(state: dict) -> str:
         intent = state.get("intent", "general_qa")

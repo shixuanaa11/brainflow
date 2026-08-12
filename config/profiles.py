@@ -1,16 +1,10 @@
 """LLM Profile 加载：扁平 llm_profiles.yaml，按 LLM_MODEL 名匹配"""
-import os
-import re
 from pathlib import Path
 
 import yaml
 
 _PROFILE_FILE = Path(__file__).parent / "llm_profiles.yaml"
 _PROFILES: dict[str, dict] | None = None
-
-
-def _resolve(value: str) -> str:
-    return re.sub(r"\$\{(\w+)\}", lambda m: os.getenv(m.group(1), ""), str(value))
 
 
 def _normalize_base_url(url: str) -> str:
@@ -37,9 +31,9 @@ def load_profiles() -> dict[str, dict]:
         if not isinstance(cfg, dict) or "model" not in cfg:
             continue
         _PROFILES[name] = {
-            "model": cfg["model"],
-            "base_url": _normalize_base_url(_resolve(cfg.get("base_url", ""))),
-            "api_key": _resolve(cfg.get("api_key", "")),
+            "model": str(cfg["model"]),
+            "base_url": _normalize_base_url(str(cfg.get("base_url", ""))),
+            "api_key": str(cfg.get("api_key", "")).strip(),
         }
     return _PROFILES
 

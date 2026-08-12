@@ -85,10 +85,10 @@ LANGSMITH_TRACING=true
 
 ---
 
-## 5. 与内置前端的分工
+## 5. 前端分工
 
 | 前端 | 类型 | 场景 | 启动 |
 | --- | --- | --- | --- |
-| 内置面板（api/static） | 自研 | **生产**（对话/图/看板） | `python server/main.py` |
+| 运营看板（`web/`） | 自研 | **生产**（对话/图/看板/Job） | `cd web && npm run dev` |
 | LangGraph Studio | 官方 IDE | **调试**（图可视化） | `langgraph dev` |
 | Agent Chat UI | 官方应用 | **调试**（聊天） | `npx create-agent-chat-app` + `pnpm dev` |

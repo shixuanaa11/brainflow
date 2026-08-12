@@ -11,6 +11,9 @@ class ToolRegistry:
                  keywords: list[str] | None = None,
                  examples: list[str] | None = None,
                  direct_reply: bool = False,
+                 async_execution: bool = False,
+                 job_timeout_sec: int = 300,
+                 job_max_attempts: int = 1,
                  router_hint: str = "",
                  router_exclude: str = ""):
         """注册工具：fn 签名 (query="", **kwargs) -> str"""
@@ -20,6 +23,9 @@ class ToolRegistry:
             "keywords": keywords or [],
             "examples": examples or [],
             "direct_reply": direct_reply,
+            "async_execution": async_execution,
+            "job_timeout_sec": job_timeout_sec,
+            "job_max_attempts": job_max_attempts,
             "router_hint": router_hint,
             "router_exclude": router_exclude,
         }

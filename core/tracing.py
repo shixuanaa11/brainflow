@@ -79,6 +79,9 @@ class TraceSpan:
         """节点执行开始前调用：LLM 的 token 将挂到该节点"""
         self._current_node = node
 
+    def current_trace_id(self) -> str:
+        return self._current.get("id", "") if self._current else ""
+
     def add_pending_tokens(self, tokens: int):
         """LLM 调用后暂存 token 到当前节点（span 插入时合并）"""
         c = self._current
