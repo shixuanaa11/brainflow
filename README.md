@@ -180,7 +180,7 @@ flowchart TB
 | 依赖 | 版本 | 说明 |
 | --- | --- | --- |
 | Python | >= 3.11 | LangGraph / FastAPI 要求 |
-| Node.js（可选） | >= 18 | 运营看板 `web/` 与 Agent Chat UI 需要 |
+| Node.js | >= 18 | 运营看板 `web/`（`npm run dev`） |
 
 ### 1. 安装依赖
 
@@ -205,27 +205,70 @@ cp config/llm_profiles.example.yaml config/llm_profiles.yaml
 LLM_MODEL=qwen3.7-flash
 ```
 
-> 密钥与 endpoint 均在 `config/llm_profiles.yaml` 维护（已加入 `.gitignore`）；切换模型只改 `.env` 的 `LLM_MODEL`。
+> 密钥与 endpoint 均在 `config/llm_profiles.yaml` 维护（已加入 `.gitignore`）；切换模型只改 `.env` 的 `LLM_MODEL`。  
+> 若需 **LangGraph + LangSmith 开发运维**，请在 `.env` 中配置 `LANGSMITH_API_KEY`、`LANGSMITH_PROJECT`，并将 `LANGSMITH_TRACING=true`。
 
-### 3. 启动
+### 3. 启动（三个终端）
 
-```bash
+日常开发需 **分别开三个终端** 并行运行（Windows PowerShell 示例）：
+
+**终端 ① — FastAPI 后端（生产 API · 必选）**
+
+```powershell
 .venv\Scripts\python server\main.py
 ```
 
-启动成功后：
+- http://localhost:5173/docs — Swagger  
+- http://localhost:5173/healthz — 健康检查  
+- 运营看板、对话 SSE、Job 看板均代理到此端口
 
-- **API / Swagger**：http://localhost:5173 · http://localhost:5173/docs
-- **运营看板（UI）**：见下方 `web/` 启动（默认 :5174）
-- 日志输出 JSON 结构化（每请求带 trace_id）
+**终端 ② — LangGraph + LangSmith（开发运维 · 调试图 / trace）**
 
-**启动运营看板**——需先启动后端，再另开终端：
+```powershell
+$env:PYTHONUTF8="1"
+$env:PYTHONIOENCODING="utf-8"
+.venv\Scripts\langgraph dev --host 127.0.0.1 --port 2024
+```
+
+- http://127.0.0.1:2024 — LangGraph Server / Studio  
+- Trace 上传 LangSmith（需 `.env` 中 `LANGSMITH_*` 已配置）  
+- **与终端 ① 互补**：① 走自研 FastAPI + SQLite 观测；② 走官方 Server + LangSmith 主线
+
+**终端 ③ — Web 运营看板（生产 UI · 使用产品功能时必选）**
+
+```powershell
+cd web
+npm install   # 首次
+npm run dev
+```
+
+- http://localhost:5174 — 总览 / 链路追踪 / 工作流图 / AI 对话 / Job 看板  
+- Vite 将 `/api`、`/healthz` 代理到 `:5173`，**须先启动终端 ①**
+
+| 终端 | 命令 | 端口 | 用途 |
+| --- | --- | --- | --- |
+| ① 后端 | `python server\main.py` | 5173 | REST/SSE、Job、chat 持久化 |
+| ② LangGraph | `langgraph dev …` | 2024 | Studio、LangSmith trace、图调试 |
+| ③ 前端 | `cd web && npm run dev` | 5174 | 自研运营看板（对接 ①） |
+
+> **最小用法**：只用看板对话 → 开 **① + ③**。只做 LangGraph/ LangSmith 调试 → 开 **②**（可不启 ③）。全链路联调 → **① + ② + ③** 同时运行。
+
+<details>
+<summary>macOS / Linux 命令</summary>
 
 ```bash
+# ① 后端
+.venv/bin/python server/main.py
+
+# ② LangGraph + LangSmith
+export PYTHONUTF8=1 PYTHONIOENCODING=utf-8
+.venv/bin/langgraph dev --host 127.0.0.1 --port 2024
+
+# ③ 前端
 cd web && npm install && npm run dev
 ```
 
-- **运营看板**：http://localhost:5174（总览 / 链路追踪 / 工作流图 / AI 对话）
+</details>
 
 ### 4. 验证
 

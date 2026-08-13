@@ -33,10 +33,13 @@ BrainFlow 自研运营前端：总览指标、任务链路追踪、LangGraph 工
 ### 前置条件
 
 - Node.js >= 18
-- **先启动后端**（否则页面无数据、对话不可用）：
+- 仓库根目录已按 [README 快速开始](../README.md#3-启动三个终端) 启动：
+  - **终端 ①** FastAPI 后端（`:5173`，本前端代理目标）
+  - **终端 ③** 即下方 `npm run dev`（`:5174`）
+  - （可选）**终端 ②** `langgraph dev`（`:2024`，LangSmith 调试，与本看板独立）
 
-```bash
-# 在仓库根目录
+```powershell
+# 终端 ① — 在仓库根目录
 .venv\Scripts\python server\main.py
 ```
 
