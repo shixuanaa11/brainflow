@@ -320,7 +320,7 @@ brainflow/
 
 ## API 接口
 
-统一由 `api/main.py`（FastAPI，端口 **5173**）提供，Swagger：`/docs`。
+统一由 `api/main.py`（FastAPI，端口 **5173**）提供，Swagger：`/docs`。完整请求/响应与 SSE 事件说明见 **[docs/API.md](docs/API.md)**。
 
 ### 内置运维 API（生产看板 · SQLite）
 
