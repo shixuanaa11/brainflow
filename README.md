@@ -11,7 +11,7 @@
 
 | 项 | 内容 |
 | --- | --- |
-| **作者** | 黄宇然（huangyuran） |
+| **作者** | axuan |
 | **版本** | v1.2（2026-08-12） |
 | **技术栈** | Python 3.11+ · LangGraph 1.x · FastAPI · SQLite · React 19 + Vite |
 | **代码位置** | `D:\code\brainflow` |
@@ -485,4 +485,4 @@ Windows 默认用 GBK 解码，而 LangGraph 源码用 `open()` 读 JSON。启�
 
 ## License
 
-© 2026 黄宇然. 保留所有权利。
+© 2026 axuan. 保留所有权利。
